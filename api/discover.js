@@ -1,7 +1,7 @@
+"use strict";
+
 const MAX_RESULTS = 500;
 const REQUEST_TIMEOUT_MS = 15000;
-
-const ALLOWED_PERIODS = new Set([24, 48]);
 
 function normalizeTld(value) {
   if (typeof value !== "string") {
@@ -15,7 +15,7 @@ function normalizeTld(value) {
   }
 
   if (!tld.startsWith(".")) {
-    tld = "." + tld;
+    tld = `.${tld}`;
   }
 
   if (!/^\.[a-z0-9-]{2,24}$/.test(tld)) {
@@ -23,6 +23,30 @@ function normalizeTld(value) {
   }
 
   return tld;
+}
+
+function normalizePeriod(body) {
+  if (body && body.periodHours !== undefined) {
+    const hours = Number(body.periodHours);
+
+    if (hours === 24 || hours === 48) {
+      return hours;
+    }
+  }
+
+  if (body && typeof body.period === "string") {
+    const value = body.period.toLowerCase().trim();
+
+    if (value === "24h") {
+      return 24;
+    }
+
+    if (value === "48h") {
+      return 48;
+    }
+  }
+
+  return 24;
 }
 
 function normalizeDomain(value) {
@@ -35,8 +59,11 @@ function normalizeDomain(value) {
   domain = domain.replace(/^\*\./, "");
   domain = domain.replace(/\.$/, "");
 
+  if (!domain) {
+    return null;
+  }
+
   if (
-    !domain ||
     domain.length > 253 ||
     domain.includes(" ") ||
     domain.includes("/") ||
@@ -56,32 +83,40 @@ function normalizeDomain(value) {
   return domain;
 }
 
-function getDomainFromCertificateName(name) {
-  if (typeof name !== "string") {
-    return null;
+function getCertificateNames(row) {
+  const names = [];
+
+  if (typeof row?.name_value === "string") {
+    names.push(...row.name_value.split(/\r?\n/));
   }
 
-  const value = name.trim().toLowerCase();
-
-  if (value.startsWith("*.")) {
-    return value.substring(2);
+  if (typeof row?.common_name === "string") {
+    names.push(row.common_name);
   }
 
-  return value;
+  return names;
 }
 
-function isMatchingTld(domain, tld) {
-  return domain.endsWith(tld);
-}
+function getCertificateTime(row) {
+  const values = [
+    row?.min_entry_timestamp,
+    row?.entry_timestamp,
+    row?.not_before
+  ];
 
-function parseCertificateTimestamp(value) {
-  const date = new Date(value);
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
 
-  if (Number.isNaN(date.getTime())) {
-    return null;
+    const date = new Date(value);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
   }
 
-  return date.toISOString();
+  return null;
 }
 
 async function fetchJson(url) {
@@ -104,51 +139,76 @@ async function fetchJson(url) {
     const text = await response.text();
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`crt.sh HTTP ${response.status}`);
     }
 
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new Error("Invalid JSON response");
+    if (!text.trim()) {
+      throw new Error("crt.sh returned an empty response");
     }
+
+    let data;
+
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error("crt.sh returned invalid JSON");
+    }
+
+    if (!Array.isArray(data)) {
+      throw new Error("crt.sh returned an unexpected response format");
+    }
+
+    return data;
   } finally {
     clearTimeout(timeout);
   }
 }
 
 async function queryCrtSh(tld) {
-  const queries = [
-    `%25${tld}`,
-    `%25${tld.substring(1)}`
-  ];
+  /*
+   * IMPORTANT:
+   *
+   * The actual crt.sh search is:
+   *
+   *     %.top
+   *
+   * encodeURIComponent() changes it to:
+   *
+   *     %25.top
+   *
+   * Do NOT pre-encode the % before calling encodeURIComponent().
+   */
 
-  const allRows = [];
-  const errors = [];
+  const searchPattern = `%${tld}`;
 
-  for (const query of queries) {
-    const url =
-      `https://crt.sh/?q=${encodeURIComponent(query)}` +
-      `&output=json`;
+  const url =
+    `https://crt.sh/?q=${encodeURIComponent(searchPattern)}` +
+    `&output=json`;
 
-    try {
-      const data = await fetchJson(url);
+  const startedAt = Date.now();
 
-      if (Array.isArray(data)) {
-        allRows.push(...data);
-      }
-    } catch (error) {
-      errors.push(error.message || "Unknown CT error");
-    }
+  try {
+    const rows = await fetchJson(url);
+
+    return {
+      ok: true,
+      url,
+      rows,
+      durationMs: Date.now() - startedAt,
+      error: null
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      url,
+      rows: [],
+      durationMs: Date.now() - startedAt,
+      error: error.message || "Unknown crt.sh error"
+    };
   }
-
-  return {
-    rows: allRows,
-    errors
-  };
 }
 
-function extractDomainsFromRows(rows, tld, cutoffTime) {
+function extractRecentDomains(rows, tld, cutoffTime) {
   const domains = new Map();
 
   for (const row of rows) {
@@ -156,43 +216,32 @@ function extractDomainsFromRows(rows, tld, cutoffTime) {
       continue;
     }
 
-    const timestamp =
-      row.not_before ||
-      row.entry_timestamp ||
-      row.entry_time ||
-      row.notAfter;
+    const certificateTime = getCertificateTime(row);
 
-    const discoveredDate = parseCertificateTimestamp(timestamp);
-
-    if (!discoveredDate) {
+    if (!certificateTime) {
       continue;
     }
 
-    const discoveredTime = new Date(discoveredDate).getTime();
+    const timestamp = certificateTime.getTime();
 
-    if (discoveredTime < cutoffTime) {
+    if (timestamp < cutoffTime) {
       continue;
     }
 
-    const names = [];
-
-    if (typeof row.name_value === "string") {
-      names.push(...row.name_value.split(/\r?\n/));
-    }
-
-    if (typeof row.common_name === "string") {
-      names.push(row.common_name);
-    }
+    const names = getCertificateNames(row);
 
     for (const rawName of names) {
-      const domainName = getDomainFromCertificateName(rawName);
-      const domain = normalizeDomain(domainName);
+      const cleanName = String(rawName)
+        .trim()
+        .toLowerCase();
+
+      const domain = normalizeDomain(cleanName);
 
       if (!domain) {
         continue;
       }
 
-      if (!isMatchingTld(domain, tld)) {
+      if (!domain.endsWith(tld)) {
         continue;
       }
 
@@ -200,15 +249,22 @@ function extractDomainsFromRows(rows, tld, cutoffTime) {
 
       if (
         !existing ||
-        new Date(discoveredDate).getTime() >
+        timestamp >
           new Date(existing.discoveredAt).getTime()
       ) {
         domains.set(domain, {
           domain,
-          discoveredAt: discoveredDate,
+          discoveredAt: certificateTime.toISOString(),
+
+          /*
+           * CT timestamp is discovery/certificate evidence,
+           * NOT proof of domain registration.
+           */
           registeredAt: null,
+          registrationVerified: false,
+
           source: "crt.sh",
-          registrationVerified: false
+          discoveryEvidence: "certificate-transparency"
         });
       }
     }
@@ -244,57 +300,62 @@ export default async function handler(req, res) {
       )
     ];
 
-    if (tlds.length === 0) {
+    if (!tlds.length) {
       return res.status(400).json({
         ok: false,
         error: "No valid TLD selected."
       });
     }
 
-    const requestedPeriod = Number(body.periodHours || 24);
-
-    const periodHours = ALLOWED_PERIODS.has(requestedPeriod)
-      ? requestedPeriod
-      : 24;
+    const periodHours = normalizePeriod(body);
 
     const now = Date.now();
+
     const cutoffTime =
       now - periodHours * 60 * 60 * 1000;
 
-    const globalDomains = new Map();
+    const allDomains = new Map();
     const sourceStatus = [];
 
     for (const tld of tlds) {
       const result = await queryCrtSh(tld);
 
-      const domains = extractDomainsFromRows(
+      const discovered = extractRecentDomains(
         result.rows,
         tld,
         cutoffTime
       );
 
-      for (const [domain, info] of domains.entries()) {
-        const existing = globalDomains.get(domain);
+      for (const [domain, record] of discovered) {
+        const existing = allDomains.get(domain);
 
         if (
           !existing ||
-          new Date(info.discoveredAt).getTime() >
+          new Date(record.discoveredAt).getTime() >
             new Date(existing.discoveredAt).getTime()
         ) {
-          globalDomains.set(domain, info);
+          allDomains.set(domain, record);
         }
       }
 
       sourceStatus.push({
         source: "crt.sh",
         tld,
+
+        queryWorked: result.ok,
+
         rowsReceived: result.rows.length,
-        domainsFound: domains.size,
-        errors: result.errors
+
+        domainsFoundInPeriod:
+          discovered.size,
+
+        durationMs: result.durationMs,
+
+        error: result.error
       });
     }
 
-    const domains = Array.from(globalDomains.values())
+    const domains = Array.from(allDomains.values())
       .sort((a, b) => {
         return (
           new Date(b.discoveredAt).getTime() -
@@ -303,23 +364,56 @@ export default async function handler(req, res) {
       })
       .slice(0, MAX_RESULTS);
 
+    const successfulSources =
+      sourceStatus.filter(
+        item => item.queryWorked
+      ).length;
+
+    const failedSources =
+      sourceStatus.filter(
+        item => !item.queryWorked
+      ).length;
+
     return res.status(200).json({
       ok: true,
+
       periodHours,
+
       tlds,
-      cutoffTime: new Date(cutoffTime).toISOString(),
-      scannedAt: new Date().toISOString(),
+
+      scannedAt:
+        new Date(now).toISOString(),
+
+      cutoffTime:
+        new Date(cutoffTime).toISOString(),
+
       count: domains.length,
+
       domains,
+
+      sourceSummary: {
+        totalSources: sourceStatus.length,
+        successfulSources,
+        failedSources
+      },
+
       sourceStatus
     });
   } catch (error) {
-    console.error("DISCOVER ERROR:", error);
+    console.error(
+      "LD76 DISCOVERY ERROR:",
+      error
+    );
 
     return res.status(500).json({
       ok: false,
-      error: "Domain discovery failed.",
-      message: error.message || "Unknown discovery error."
+
+      error:
+        "Domain discovery failed.",
+
+      message:
+        error?.message ||
+        "Unknown server error."
     });
   }
 }
