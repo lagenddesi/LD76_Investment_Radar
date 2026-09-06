@@ -2,18 +2,20 @@
 
 /*
  * LD76 INVESTMENT RADAR
- * Domain Discovery
+ * Dual Certificate Transparency Discovery
  *
- * Strategy:
- * 1. Query crt.sh with wildcard TLD.
- * 2. Retry transient failures.
- * 3. Try alternate crt.sh query form if the first request fails.
- * 4. Deduplicate domains.
- * 5. Prefer domains whose CT observation is inside 24H/48H.
- * 6. If CT timestamps are unavailable, fall back to all matching domains.
+ * Sources:
+ *   1. crt.sh
+ *   2. ctlogs.dev
+ *
+ * Both sources are queried for every selected TLD.
+ * Results are merged and deduplicated.
+ *
+ * If one source fails, the other can still provide results.
  *
  * IMPORTANT:
- * CT discovery time != verified domain registration time.
+ * Certificate Transparency discovery time is NOT
+ * the same thing as verified domain registration time.
  */
 
 const MAX_RESULTS = 500;
@@ -27,9 +29,10 @@ const RETRY_DELAYS_MS = [
   1800
 ];
 
-/* ----------------------------------
- * Helpers
- * ---------------------------------- */
+
+/* =========================================================
+ * BASIC HELPERS
+ * ========================================================= */
 
 function normalizeTld(value) {
   if (typeof value !== "string") {
@@ -58,25 +61,17 @@ function normalizeTld(value) {
 
 function normalizePeriod(body) {
   if (body?.periodHours !== undefined) {
-    const hours = Number(
-      body.periodHours
-    );
+    const hours = Number(body.periodHours);
 
-    if (
-      hours === 24 ||
-      hours === 48
-    ) {
+    if (hours === 24 || hours === 48) {
       return hours;
     }
   }
 
-  if (
-    typeof body?.period === "string"
-  ) {
-    const period =
-      body.period
-        .trim()
-        .toLowerCase();
+  if (typeof body?.period === "string") {
+    const period = body.period
+      .trim()
+      .toLowerCase();
 
     if (period === "24h") {
       return 24;
@@ -96,34 +91,28 @@ function normalizeDomain(value) {
     return null;
   }
 
-  let domain =
-    value
-      .trim()
-      .toLowerCase();
+  let domain = value
+    .trim()
+    .toLowerCase();
 
-  domain =
-    domain.replace(
-      /^\*\.\s*/,
-      ""
-    );
+  domain = domain.replace(
+    /^\*\.\s*/,
+    ""
+  );
 
-  domain =
-    domain.replace(
-      /^https?:\/\//,
-      ""
-    );
+  domain = domain.replace(
+    /^https?:\/\//,
+    ""
+  );
 
-  domain =
-    domain.split("/")[0];
+  domain = domain.split("/")[0];
 
-  domain =
-    domain.split("?")[0];
+  domain = domain.split("?")[0];
 
-  domain =
-    domain.replace(
-      /\.$/,
-      ""
-    );
+  domain = domain.replace(
+    /\.$/,
+    ""
+  );
 
   if (!domain) {
     return null;
@@ -137,9 +126,6 @@ function normalizeDomain(value) {
     return null;
   }
 
-  /*
-   * Accept normal DNS domains.
-   */
   const valid =
     /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
@@ -151,7 +137,361 @@ function normalizeDomain(value) {
 }
 
 
-function getNames(row) {
+function sleep(ms) {
+  return new Promise(resolve =>
+    setTimeout(resolve, ms)
+  );
+}
+
+
+/* =========================================================
+ * HTTP
+ * ========================================================= */
+
+async function fetchText(url) {
+  const controller =
+    new AbortController();
+
+  const timer = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS
+  );
+
+  try {
+    const response = await fetch(
+      url,
+      {
+        method: "GET",
+
+        headers: {
+          Accept:
+            "application/json,text/plain,*/*",
+
+          "User-Agent":
+            "Mozilla/5.0 LD76-Investment-Radar/1.0"
+        },
+
+        signal:
+          controller.signal
+      }
+    );
+
+    const text =
+      await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}`
+      );
+    }
+
+    if (!text.trim()) {
+      throw new Error(
+        "Empty response"
+      );
+    }
+
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+async function fetchJsonWithRetry(url) {
+  let lastError = null;
+
+  for (
+    let attempt = 0;
+    attempt <= MAX_RETRIES;
+    attempt++
+  ) {
+    try {
+      const text =
+        await fetchText(url);
+
+      let data;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(
+          "Invalid JSON response"
+        );
+      }
+
+      return {
+        ok: true,
+        data,
+        attempts:
+          attempt + 1,
+        error: null
+      };
+    } catch (error) {
+      lastError =
+        error?.message ||
+        "Unknown request error";
+
+      if (
+        attempt < MAX_RETRIES
+      ) {
+        await sleep(
+          RETRY_DELAYS_MS[attempt] ||
+          1500
+        );
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    data: null,
+    attempts:
+      MAX_RETRIES + 1,
+    error: lastError
+  };
+}
+
+
+/* =========================================================
+ * CRT.SH
+ * ========================================================= */
+
+function buildCrtUrl(tld) {
+  const wildcard = `%${tld}`;
+
+  return (
+    "https://crt.sh/?q=" +
+    encodeURIComponent(wildcard) +
+    "&output=json"
+  );
+}
+
+
+async function queryCrtSh(tld) {
+  const url =
+    buildCrtUrl(tld);
+
+  const started =
+    Date.now();
+
+  const result =
+    await fetchJsonWithRetry(url);
+
+  if (
+    !result.ok
+  ) {
+    return {
+      source:
+        "crt.sh",
+
+      ok: false,
+
+      rows: [],
+
+      durationMs:
+        Date.now() - started,
+
+      attempts:
+        result.attempts,
+
+      error:
+        result.error,
+
+      url
+    };
+  }
+
+  if (
+    !Array.isArray(
+      result.data
+    )
+  ) {
+    return {
+      source:
+        "crt.sh",
+
+      ok: false,
+
+      rows: [],
+
+      durationMs:
+        Date.now() - started,
+
+      attempts:
+        result.attempts,
+
+      error:
+        "crt.sh JSON was not an array",
+
+      url
+    };
+  }
+
+  return {
+    source:
+      "crt.sh",
+
+    ok: true,
+
+    rows:
+      result.data,
+
+    durationMs:
+      Date.now() - started,
+
+    attempts:
+      result.attempts,
+
+    error: null,
+
+    url
+  };
+}
+
+
+/* =========================================================
+ * CTLOGS.DEV
+ * ========================================================= */
+
+function buildCtlogsUrl(tld) {
+  /*
+   * ctlogs.dev accepts the same wildcard style:
+   *
+   * *.top
+   * *.xyz
+   *
+   * Their search endpoint supports:
+   *
+   * /search?q=...&output=json
+   */
+
+  const wildcard =
+    `*${tld}`;
+
+  return (
+    "https://ctlogs.dev/search?q=" +
+    encodeURIComponent(
+      wildcard
+    ) +
+    "&output=json"
+  );
+}
+
+
+async function queryCtlogsDev(tld) {
+  const url =
+    buildCtlogsUrl(tld);
+
+  const started =
+    Date.now();
+
+  const result =
+    await fetchJsonWithRetry(url);
+
+  if (
+    !result.ok
+  ) {
+    return {
+      source:
+        "ctlogs.dev",
+
+      ok: false,
+
+      rows: [],
+
+      durationMs:
+        Date.now() - started,
+
+      attempts:
+        result.attempts,
+
+      error:
+        result.error,
+
+      url
+    };
+  }
+
+  /*
+   * ctlogs.dev's search endpoint
+   * can return either:
+   *
+   * [
+   *   {...}
+   * ]
+   *
+   * or an envelope:
+   *
+   * {
+   *   rows: [...]
+   * }
+   */
+
+  let rows = [];
+
+  if (
+    Array.isArray(
+      result.data
+    )
+  ) {
+    rows =
+      result.data;
+  } else if (
+    Array.isArray(
+      result.data?.rows
+    )
+  ) {
+    rows =
+      result.data.rows;
+  } else {
+    return {
+      source:
+        "ctlogs.dev",
+
+      ok: false,
+
+      rows: [],
+
+      durationMs:
+        Date.now() - started,
+
+      attempts:
+        result.attempts,
+
+      error:
+        "ctlogs.dev returned an unsupported JSON structure",
+
+      url
+    };
+  }
+
+  return {
+    source:
+      "ctlogs.dev",
+
+    ok: true,
+
+    rows,
+
+    durationMs:
+      Date.now() - started,
+
+    attempts:
+      result.attempts,
+
+    error: null,
+
+    url
+  };
+}
+
+
+/* =========================================================
+ * EXTRACT CRT.SH ROW
+ * ========================================================= */
+
+function extractCrtNames(row) {
   const names = [];
 
   if (
@@ -178,7 +518,7 @@ function getNames(row) {
 }
 
 
-function getCertificateDate(row) {
+function getCrtDate(row) {
   const fields = [
     row?.entry_timestamp,
     row?.min_entry_timestamp,
@@ -209,275 +549,86 @@ function getCertificateDate(row) {
 }
 
 
-function sleep(ms) {
-  return new Promise(
-    resolve =>
-      setTimeout(
-        resolve,
-        ms
-      )
-  );
-}
+/* =========================================================
+ * EXTRACT CTLOGS.DEV ROW
+ * ========================================================= */
 
+function extractCtlogsNames(row) {
+  const names = [];
 
-/* ----------------------------------
- * HTTP fetch
- * ---------------------------------- */
-
-async function fetchText(
-  url
-) {
-  const controller =
-    new AbortController();
-
-  const timer =
-    setTimeout(
-      () =>
-        controller.abort(),
-      REQUEST_TIMEOUT_MS
+  if (
+    typeof row?.match ===
+    "string"
+  ) {
+    names.push(
+      row.match
     );
-
-  try {
-    const response =
-      await fetch(
-        url,
-        {
-          method: "GET",
-
-          headers: {
-            Accept:
-              "application/json,text/plain,*/*",
-
-            "User-Agent":
-              "Mozilla/5.0 LD76-Investment-Radar/1.0"
-          },
-
-          signal:
-            controller.signal
-        }
-      );
-
-    const text =
-      await response.text();
-
-    if (!response.ok) {
-      throw new Error(
-        `HTTP ${response.status}`
-      );
-    }
-
-    if (!text.trim()) {
-      throw new Error(
-        "Empty response"
-      );
-    }
-
-    return text;
-  } finally {
-    clearTimeout(timer);
   }
-}
 
-
-async function fetchCrtJson(
-  url
-) {
-  let lastError =
-    null;
-
-  for (
-    let attempt = 0;
-    attempt <= MAX_RETRIES;
-    attempt++
+  if (
+    typeof row?.subject_cn ===
+    "string"
   ) {
-    try {
-      const text =
-        await fetchText(url);
-
-      let data;
-
-      try {
-        data =
-          JSON.parse(text);
-      } catch {
-        throw new Error(
-          "crt.sh returned invalid JSON"
-        );
-      }
-
-      if (!Array.isArray(data)) {
-        throw new Error(
-          "crt.sh response is not an array"
-        );
-      }
-
-      return {
-        ok: true,
-        rows: data,
-        attempts:
-          attempt + 1,
-        error: null
-      };
-    } catch (error) {
-      lastError =
-        error?.message ||
-        "Unknown crt.sh error";
-
-      if (
-        attempt <
-        MAX_RETRIES
-      ) {
-        await sleep(
-          RETRY_DELAYS_MS[
-            attempt
-          ] || 1500
-        );
-      }
-    }
+    names.push(
+      row.subject_cn
+    );
   }
 
-  return {
-    ok: false,
-    rows: [],
-    attempts:
-      MAX_RETRIES + 1,
-    error:
-      lastError
-  };
+  /*
+   * Some response variants may expose
+   * domain names directly.
+   */
+
+  if (
+    Array.isArray(
+      row?.domains
+    )
+  ) {
+    names.push(
+      ...row.domains
+    );
+  }
+
+  return names;
 }
 
 
-/* ----------------------------------
- * crt.sh query variants
- * ---------------------------------- */
-
-function buildQueries(tld) {
-  /*
-   * Primary:
-   *
-   * %.top
-   *
-   * encodeURIComponent() converts
-   * % -> %25.
-   */
-  const wildcard =
-    `%${tld}`;
-
-  const primary =
-    `https://crt.sh/?q=${encodeURIComponent(
-      wildcard
-    )}&output=json`;
-
-  /*
-   * Alternate form.
-   *
-   * crt.sh also supports the
-   * identity query syntax.
-   */
-  const identity =
-    `https://crt.sh/?Identity=${encodeURIComponent(
-      wildcard
-    )}&output=json`;
-
-  return [
-    {
-      name:
-        "crt.sh-q",
-      url:
-        primary
-    },
-    {
-      name:
-        "crt.sh-identity",
-      url:
-        identity
-    }
+function getCtlogsDate(row) {
+  const fields = [
+    row?.not_before,
+    row?.precert_first_seen,
+    row?.final_first_seen
   ];
-}
-
-
-/* ----------------------------------
- * Query source
- * ---------------------------------- */
-
-async function queryCrtSh(
-  tld
-) {
-  const queries =
-    buildQueries(tld);
-
-  const attempts = [];
 
   for (
-    const query
-    of queries
+    const value of fields
   ) {
-    const started =
-      Date.now();
+    if (!value) {
+      continue;
+    }
 
-    const result =
-      await fetchCrtJson(
-        query.url
-      );
+    const date =
+      new Date(value);
 
-    attempts.push({
-      query:
-        query.name,
-
-      url:
-        query.url,
-
-      ok:
-        result.ok,
-
-      rows:
-        result.rows.length,
-
-      attempts:
-        result.attempts,
-
-      durationMs:
-        Date.now() -
-        started,
-
-      error:
-        result.error
-    });
-
-    if (result.ok) {
-      return {
-        ok: true,
-
-        rows:
-          result.rows,
-
-        query:
-          query.name,
-
-        attempts
-      };
+    if (
+      !Number.isNaN(
+        date.getTime()
+      )
+    ) {
+      return date;
     }
   }
 
-  return {
-    ok: false,
-
-    rows: [],
-
-    query:
-      null,
-
-    attempts
-  };
+  return null;
 }
 
 
-/* ----------------------------------
- * Extract domains
- * ---------------------------------- */
+/* =========================================================
+ * GENERIC EXTRACTION
+ * ========================================================= */
 
-function extractDomains(
-  rows,
+function extractSourceDomains(
+  sourceResult,
   tld,
   cutoffTime
 ) {
@@ -493,7 +644,7 @@ function extractDomains(
 
   for (
     const row
-    of rows
+    of sourceResult.rows
   ) {
     if (
       !row ||
@@ -503,17 +654,38 @@ function extractDomains(
       continue;
     }
 
-    const names =
-      getNames(row);
+    let names;
+
+    let certificateDate;
+
+    if (
+      sourceResult.source ===
+      "crt.sh"
+    ) {
+      names =
+        extractCrtNames(
+          row
+        );
+
+      certificateDate =
+        getCrtDate(
+          row
+        );
+    } else {
+      names =
+        extractCtlogsNames(
+          row
+        );
+
+      certificateDate =
+        getCtlogsDate(
+          row
+        );
+    }
 
     if (names.length) {
       rowsWithNames++;
     }
-
-    const certificateDate =
-      getCertificateDate(
-        row
-      );
 
     if (certificateDate) {
       rowsWithDates++;
@@ -533,10 +705,7 @@ function extractDomains(
       }
 
       /*
-       * Only exact requested TLD.
-       *
-       * Prevent:
-       * example.top.evil.com
+       * Exact selected TLD.
        */
       if (
         !domain.endsWith(
@@ -547,8 +716,8 @@ function extractDomains(
       }
 
       /*
-       * Make sure the suffix
-       * itself is the TLD.
+       * Must actually have a domain
+       * before the TLD.
        */
       const suffixStart =
         domain.length -
@@ -577,7 +746,7 @@ function extractDomains(
           false,
 
         source:
-          "crt.sh",
+          sourceResult.source,
 
         discoveryEvidence:
           "certificate-transparency"
@@ -613,7 +782,7 @@ function extractDomains(
       }
 
       /*
-       * Recent observation.
+       * Recent CT observation.
        */
       if (
         certificateDate &&
@@ -658,9 +827,109 @@ function extractDomains(
 }
 
 
-/* ----------------------------------
- * Handler
- * ---------------------------------- */
+/* =========================================================
+ * MERGE RECORD
+ * ========================================================= */
+
+function mergeRecord(
+  existing,
+  incoming
+) {
+  if (!existing) {
+    return incoming;
+  }
+
+  /*
+   * Prefer the newest discovery time.
+   */
+  const existingTime =
+    existing.discoveredAt
+      ? new Date(
+          existing.discoveredAt
+        ).getTime()
+      : 0;
+
+  const incomingTime =
+    incoming.discoveredAt
+      ? new Date(
+          incoming.discoveredAt
+        ).getTime()
+      : 0;
+
+  const newer =
+    incomingTime >
+    existingTime
+      ? incoming
+      : existing;
+
+  /*
+   * Record both sources when
+   * possible.
+   */
+  const sources =
+    new Set();
+
+  if (
+    Array.isArray(
+      existing.sources
+    )
+  ) {
+    for (
+      const source
+      of existing.sources
+    ) {
+      sources.add(
+        source
+      );
+    }
+  } else if (
+    existing.source
+  ) {
+    sources.add(
+      existing.source
+    );
+  }
+
+  if (
+    Array.isArray(
+      incoming.sources
+    )
+  ) {
+    for (
+      const source
+      of incoming.sources
+    ) {
+      sources.add(
+        source
+      );
+    }
+  } else if (
+    incoming.source
+  ) {
+    sources.add(
+      incoming.source
+    );
+  }
+
+  return {
+    ...newer,
+
+    sources:
+      Array.from(
+        sources
+      ),
+
+    source:
+      Array.from(
+        sources
+      ).join("+")
+  };
+}
+
+
+/* =========================================================
+ * HANDLER
+ * ========================================================= */
 
 export default async function handler(
   req,
@@ -684,19 +953,6 @@ export default async function handler(
     const body =
       req.body || {};
 
-    /*
-     * Accept:
-     *
-     * {
-     *   tld: ".top"
-     * }
-     *
-     * OR
-     *
-     * {
-     *   tlds: [".top", ".xyz"]
-     * }
-     */
     let requestedTlds =
       [];
 
@@ -753,6 +1009,7 @@ export default async function handler(
         60 *
         1000;
 
+
     const allCandidates =
       new Map();
 
@@ -762,135 +1019,283 @@ export default async function handler(
     const sourceStatus =
       [];
 
-    /*
-     * Query every TLD.
-     */
+
+    /* =====================================================
+     * QUERY BOTH SOURCES FOR EVERY TLD
+     *
+     * Promise.all means crt.sh and ctlogs.dev
+     * are attempted at the same time.
+     * ===================================================== */
+
     for (
       const tld
       of tlds
     ) {
-      const result =
-        await queryCrtSh(
-          tld
-        );
+      const [
+        crtResult,
+        ctlogsResult
+      ] = await Promise.all([
+        queryCrtSh(tld),
+        queryCtlogsDev(tld)
+      ]);
 
-      const extracted =
-        extractDomains(
-          result.rows,
-          tld,
-          cutoffTime
-        );
 
-      /*
-       * Merge all matching.
-       */
-      for (
-        const [
-          domain,
-          record
-        ]
-        of extracted.all
+      /* -----------------------------------------------
+       * Process crt.sh
+       * ----------------------------------------------- */
+
+      if (
+        crtResult.ok
       ) {
-        const existing =
-          allCandidates.get(
-            domain
+        const extracted =
+          extractSourceDomains(
+            crtResult,
+            tld,
+            cutoffTime
           );
 
-        if (
-          !existing ||
-          (
-            record.discoveredAt &&
-            (
-              !existing.discoveredAt ||
-              new Date(
-                record.discoveredAt
-              ).getTime() >
-              new Date(
-                existing.discoveredAt
-              ).getTime()
-            )
-          )
+        for (
+          const [
+            domain,
+            record
+          ]
+          of extracted.all
         ) {
+          const merged =
+            mergeRecord(
+              allCandidates.get(
+                domain
+              ),
+              record
+            );
+
           allCandidates.set(
             domain,
-            record
+            merged
           );
         }
-      }
 
-      /*
-       * Merge recent.
-       */
-      for (
-        const [
-          domain,
-          record
-        ]
-        of extracted.recent
-      ) {
-        const existing =
-          recentCandidates.get(
-            domain
-          );
-
-        if (
-          !existing ||
-          (
-            record.discoveredAt &&
-            (
-              !existing.discoveredAt ||
-              new Date(
-                record.discoveredAt
-              ).getTime() >
-              new Date(
-                existing.discoveredAt
-              ).getTime()
-            )
-          )
-        ) {
-          recentCandidates.set(
+        for (
+          const [
             domain,
             record
+          ]
+          of extracted.recent
+        ) {
+          const merged =
+            mergeRecord(
+              recentCandidates.get(
+                domain
+              ),
+              record
+            );
+
+          recentCandidates.set(
+            domain,
+            merged
           );
         }
+
+        sourceStatus.push({
+          source:
+            "crt.sh",
+
+          tld,
+
+          queryWorked:
+            true,
+
+          rowsReceived:
+            crtResult.rows.length,
+
+          rowsWithNames:
+            extracted.rowsWithNames,
+
+          rowsWithDates:
+            extracted.rowsWithDates,
+
+          allMatchingDomains:
+            extracted.all.size,
+
+          recentMatchingDomains:
+            extracted.recent.size,
+
+          attempts:
+            crtResult.attempts,
+
+          durationMs:
+            crtResult.durationMs,
+
+          error:
+            null
+        });
+      } else {
+        sourceStatus.push({
+          source:
+            "crt.sh",
+
+          tld,
+
+          queryWorked:
+            false,
+
+          rowsReceived:
+            0,
+
+          rowsWithNames:
+            0,
+
+          rowsWithDates:
+            0,
+
+          allMatchingDomains:
+            0,
+
+          recentMatchingDomains:
+            0,
+
+          attempts:
+            crtResult.attempts,
+
+          durationMs:
+            crtResult.durationMs,
+
+          error:
+            crtResult.error
+        });
       }
 
-      sourceStatus.push({
-        source:
-          "crt.sh",
 
-        tld,
+      /* -----------------------------------------------
+       * Process ctlogs.dev
+       * ----------------------------------------------- */
 
-        queryWorked:
-          result.ok,
+      if (
+        ctlogsResult.ok
+      ) {
+        const extracted =
+          extractSourceDomains(
+            ctlogsResult,
+            tld,
+            cutoffTime
+          );
 
-        successfulQuery:
-          result.query,
+        for (
+          const [
+            domain,
+            record
+          ]
+          of extracted.all
+        ) {
+          const merged =
+            mergeRecord(
+              allCandidates.get(
+                domain
+              ),
+              record
+            );
 
-        rowsReceived:
-          result.rows.length,
+          allCandidates.set(
+            domain,
+            merged
+          );
+        }
 
-        rowsWithNames:
-          extracted.rowsWithNames,
+        for (
+          const [
+            domain,
+            record
+          ]
+          of extracted.recent
+        ) {
+          const merged =
+            mergeRecord(
+              recentCandidates.get(
+                domain
+              ),
+              record
+            );
 
-        rowsWithDates:
-          extracted.rowsWithDates,
+          recentCandidates.set(
+            domain,
+            merged
+          );
+        }
 
-        allMatchingDomains:
-          extracted.all.size,
+        sourceStatus.push({
+          source:
+            "ctlogs.dev",
 
-        recentMatchingDomains:
-          extracted.recent.size,
+          tld,
 
-        attempts:
-          result.attempts
-      });
+          queryWorked:
+            true,
+
+          rowsReceived:
+            ctlogsResult.rows.length,
+
+          rowsWithNames:
+            extracted.rowsWithNames,
+
+          rowsWithDates:
+            extracted.rowsWithDates,
+
+          allMatchingDomains:
+            extracted.all.size,
+
+          recentMatchingDomains:
+            extracted.recent.size,
+
+          attempts:
+            ctlogsResult.attempts,
+
+          durationMs:
+            ctlogsResult.durationMs,
+
+          error:
+            null
+        });
+      } else {
+        sourceStatus.push({
+          source:
+            "ctlogs.dev",
+
+          tld,
+
+          queryWorked:
+            false,
+
+          rowsReceived:
+            0,
+
+          rowsWithNames:
+            0,
+
+          rowsWithDates:
+            0,
+
+          allMatchingDomains:
+            0,
+
+          recentMatchingDomains:
+            0,
+
+          attempts:
+            ctlogsResult.attempts,
+
+          durationMs:
+            ctlogsResult.durationMs,
+
+          error:
+            ctlogsResult.error
+        });
+      }
     }
 
 
-    /* ----------------------------------
-     * Selection
-     * ---------------------------------- */
+    /* =====================================================
+     * SELECT RECENT RESULTS
+     * ===================================================== */
 
     let selected;
 
@@ -909,10 +1314,8 @@ export default async function handler(
         "recent";
     } else {
       /*
-       * IMPORTANT:
-       *
-       * If CT timestamps are missing
-       * or delayed, don't return zero.
+       * If CT timestamps are unavailable,
+       * don't falsely report zero.
        */
       selected =
         Array.from(
@@ -924,9 +1327,9 @@ export default async function handler(
     }
 
 
-    /* ----------------------------------
-     * Sort newest first
-     * ---------------------------------- */
+    /* =====================================================
+     * SORT
+     * ===================================================== */
 
     selected.sort(
       (a, b) => {
@@ -953,10 +1356,9 @@ export default async function handler(
 
 
     /*
-     * Hard safety limit only at
-     * discovery response level.
+     * Discovery safety limit.
      *
-     * This is NOT an AI candidate limit.
+     * This does NOT limit Gemini.
      */
     const domains =
       selected.slice(
@@ -978,10 +1380,10 @@ export default async function handler(
       ).length;
 
 
-    /*
-     * If every source failed,
-     * report an actual source error.
-     */
+    /* =====================================================
+     * BOTH SOURCES FAILED
+     * ===================================================== */
+
     if (
       successfulSources === 0
     ) {
@@ -991,19 +1393,19 @@ export default async function handler(
           ok: false,
 
           error:
-            "Domain discovery source failed.",
+            "All domain discovery sources failed.",
 
           message:
-            "crt.sh did not return usable domain data after retries.",
+            "Neither crt.sh nor ctlogs.dev returned usable data.",
 
           sourceStatus
         });
     }
 
 
-    /* ----------------------------------
-     * Success
-     * ---------------------------------- */
+    /* =====================================================
+     * SUCCESS
+     * ===================================================== */
 
     return res
       .status(200)
@@ -1054,7 +1456,7 @@ export default async function handler(
         sourceStatus,
 
         note:
-          "Certificate-transparency discovery is not the same as verified domain registration."
+          "Domains are discovered from Certificate Transparency data. CT discovery is not verified domain registration."
       });
 
   } catch (error) {
@@ -1076,4 +1478,4 @@ export default async function handler(
           "Unknown server error."
       });
   }
-}
+            }
