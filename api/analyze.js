@@ -14,7 +14,7 @@
  * - API key is NEVER returned to the client.
  */
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-3.6-flash";
 
 const MAX_CANDIDATES_PER_REQUEST = 30;
 
