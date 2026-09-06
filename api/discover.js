@@ -3,33 +3,30 @@
 /*
  * LD76 INVESTMENT RADAR
  *
- * DISCOVERY PIPELINE
+ * DISCOVERY:
+ *   Certificate Transparency = discovery lead
+ *   RDAP = mandatory registration verification
  *
- * CT logs = discovery LEAD ONLY.
- * RDAP     = registration-date verification.
+ * IMPORTANT:
+ * CT certificate date is NOT registration date.
  *
- * HARD RULE:
- * A domain is returned only when:
- *
- * 1. It was recently observed in Certificate Transparency.
- * 2. RDAP returned an authoritative registration event.
- * 3. The RDAP registration date is inside the selected
- *    24H / 48H window.
- *
- * CT certificate time is NEVER treated as registration time.
+ * A domain is returned only when RDAP confirms:
+ *   registration event exists
+ *   AND registration date is inside 24H/48H window.
  */
 
 const MAX_DISCOVERY_ROWS = 5000;
 
 const CT_TIMEOUT_MS = 15000;
-const RDAP_TIMEOUT_MS = 4500;
+const RDAP_TIMEOUT_MS = 5000;
 
 const CT_RETRIES = 2;
 const RDAP_RETRIES = 1;
 
-const RDAP_CONCURRENCY = 40;
+const RDAP_CONCURRENCY = 5;
 
-const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+const FUTURE_TOLERANCE_MS =
+  5 * 60 * 1000;
 
 
 /* =========================================================
@@ -68,9 +65,10 @@ function normalizePeriod(body) {
     }
   }
 
-  const period = String(
-    body?.period || "24h"
-  ).trim().toLowerCase();
+  const period =
+    String(body?.period || "24h")
+      .trim()
+      .toLowerCase();
 
   return period === "48h" ? 48 : 24;
 }
@@ -81,24 +79,28 @@ function normalizeDomain(value) {
     return null;
   }
 
-  let domain = value
-    .trim()
-    .toLowerCase();
+  let domain =
+    value
+      .trim()
+      .toLowerCase();
 
-  domain = domain.replace(
-    /^\*\.\s*/,
-    ""
-  );
+  domain =
+    domain.replace(
+      /^\*\.\s*/,
+      ""
+    );
 
-  domain = domain.replace(
-    /^https?:\/\//,
-    ""
-  );
+  domain =
+    domain.replace(
+      /^https?:\/\//,
+      ""
+    );
 
-  domain = domain
-    .split("/")[0]
-    .split("?")[0]
-    .replace(/\.$/, "");
+  domain =
+    domain
+      .split("/")[0]
+      .split("?")[0]
+      .replace(/\.$/, "");
 
   if (!domain) {
     return null;
@@ -140,29 +142,31 @@ async function fetchText(
   const controller =
     new AbortController();
 
-  const timer = setTimeout(
-    () => controller.abort(),
-    timeoutMs
-  );
+  const timer =
+    setTimeout(
+      () => controller.abort(),
+      timeoutMs
+    );
 
   try {
-    const response = await fetch(
-      url,
-      {
-        method: "GET",
+    const response =
+      await fetch(
+        url,
+        {
+          method: "GET",
 
-        headers: {
-          Accept:
-            "application/json,text/plain,*/*",
+          headers: {
+            Accept:
+              "application/json,text/plain,*/*",
 
-          "User-Agent":
-            "Mozilla/5.0 LD76-Investment-Radar/1.0"
-        },
+            "User-Agent":
+              "Mozilla/5.0 LD76-Investment-Radar/1.0"
+          },
 
-        signal:
-          controller.signal
-      }
-    );
+          signal:
+            controller.signal
+        }
+      );
 
     const text =
       await response.text();
@@ -180,6 +184,7 @@ async function fetchText(
     }
 
     return text;
+
   } finally {
     clearTimeout(timer);
   }
@@ -205,18 +210,24 @@ async function fetchJsonWithRetry(
           timeoutMs
         );
 
+      let data;
+
       try {
-        return {
-          ok: true,
-          data: JSON.parse(text),
-          attempts: attempt + 1,
-          error: null
-        };
+        data = JSON.parse(text);
       } catch {
         throw new Error(
           "Invalid JSON response"
         );
       }
+
+      return {
+        ok: true,
+        data,
+        attempts:
+          attempt + 1,
+        error: null
+      };
+
     } catch (error) {
       lastError =
         error?.message ||
@@ -226,7 +237,7 @@ async function fetchJsonWithRetry(
         await sleep(
           attempt === 0
             ? 700
-            : 1500
+            : 1600
         );
       }
     }
@@ -235,8 +246,10 @@ async function fetchJsonWithRetry(
   return {
     ok: false,
     data: null,
-    attempts: retries + 1,
-    error: lastError
+    attempts:
+      retries + 1,
+    error:
+      lastError
   };
 }
 
@@ -247,14 +260,15 @@ async function fetchJsonWithRetry(
 
 function buildCrtUrl(tld) {
   /*
-   * crt.sh expects:
-   * %.top
-   * %.xyz
+   * Correct crt.sh wildcard:
    *
-   * Encode exactly once.
+   * %.top
+   *
+   * encodeURIComponent is applied ONCE.
    */
 
-  const wildcard = `%${tld}`;
+  const wildcard =
+    `%${tld}`;
 
   return (
     "https://crt.sh/?q=" +
@@ -265,35 +279,150 @@ function buildCrtUrl(tld) {
 
 
 async function queryCrtSh(tld) {
+  const url =
+    buildCrtUrl(tld);
+
   const result =
     await fetchJsonWithRetry(
-      buildCrtUrl(tld),
+      url,
       CT_TIMEOUT_MS,
       CT_RETRIES
     );
 
   if (!result.ok) {
-    throw new Error(
-      result.error ||
-      "crt.sh request failed"
-    );
+    return {
+      ok: false,
+      source: "crt.sh",
+      rows: [],
+      error:
+        result.error,
+      url
+    };
   }
 
   if (!Array.isArray(result.data)) {
-    throw new Error(
-      "crt.sh JSON was not an array"
-    );
+    return {
+      ok: false,
+      source: "crt.sh",
+      rows: [],
+      error:
+        "crt.sh returned unsupported JSON",
+      url
+    };
   }
 
-  return result.data.slice(
-    0,
-    MAX_DISCOVERY_ROWS
-  );
+  return {
+    ok: true,
+    source: "crt.sh",
+    rows:
+      result.data.slice(
+        0,
+        MAX_DISCOVERY_ROWS
+      ),
+    error: null,
+    url
+  };
 }
 
 
 /* =========================================================
- * CT DATE + DOMAIN EXTRACTION
+ * CTLOGS.DEV
+ * ========================================================= */
+
+function buildCtlogsUrl(tld) {
+  /*
+   * ctlogs.dev wildcard:
+   *
+   * *.top
+   */
+
+  const wildcard =
+    `*${tld}`;
+
+  return (
+    "https://ctlogs.dev/search?q=" +
+    encodeURIComponent(wildcard) +
+    "&output=json"
+  );
+}
+
+
+async function queryCtlogsDev(tld) {
+  const url =
+    buildCtlogsUrl(tld);
+
+  const result =
+    await fetchJsonWithRetry(
+      url,
+      CT_TIMEOUT_MS,
+      CT_RETRIES
+    );
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      source: "ctlogs.dev",
+      rows: [],
+      error:
+        result.error,
+      url
+    };
+  }
+
+  let rows = [];
+
+  if (Array.isArray(result.data)) {
+    rows =
+      result.data;
+  } else if (
+    Array.isArray(
+      result.data?.rows
+    )
+  ) {
+    rows =
+      result.data.rows;
+  } else if (
+    Array.isArray(
+      result.data?.results
+    )
+  ) {
+    rows =
+      result.data.results;
+  } else if (
+    Array.isArray(
+      result.data?.data
+    )
+  ) {
+    rows =
+      result.data.data;
+  }
+
+  if (!rows.length) {
+    return {
+      ok: true,
+      source: "ctlogs.dev",
+      rows: [],
+      error: null,
+      url
+    };
+  }
+
+  return {
+    ok: true,
+    source: "ctlogs.dev",
+    rows:
+      rows.slice(
+        0,
+        MAX_DISCOVERY_ROWS
+      ),
+    error: null,
+    url
+  };
+}
+
+
+/* =========================================================
+ * CT ROW EXTRACTION
  * ========================================================= */
 
 function getCertificateDate(row) {
@@ -301,7 +430,9 @@ function getCertificateDate(row) {
     row?.entry_timestamp,
     row?.min_entry_timestamp,
     row?.entry_time,
-    row?.not_before
+    row?.not_before,
+    row?.precert_first_seen,
+    row?.final_first_seen
   ];
 
   for (const value of values) {
@@ -348,16 +479,48 @@ function extractNames(row) {
     );
   }
 
+  if (
+    typeof row?.subject_cn ===
+    "string"
+  ) {
+    names.push(
+      row.subject_cn
+    );
+  }
+
+  if (
+    typeof row?.match ===
+    "string"
+  ) {
+    names.push(
+      row.match
+    );
+  }
+
+  if (
+    Array.isArray(
+      row?.domains
+    )
+  ) {
+    names.push(
+      ...row.domains
+    );
+  }
+
   return names;
 }
 
+
+/* =========================================================
+ * COLLECT CT CANDIDATES
+ * ========================================================= */
 
 function collectCtCandidates(
   rows,
   tld,
   cutoff
 ) {
-  const domains =
+  const map =
     new Map();
 
   let rowsWithNames = 0;
@@ -371,11 +534,11 @@ function collectCtCandidates(
       continue;
     }
 
-    const certificateDate =
-      getCertificateDate(row);
-
     const names =
       extractNames(row);
+
+    const certificateDate =
+      getCertificateDate(row);
 
     if (names.length) {
       rowsWithNames++;
@@ -386,34 +549,30 @@ function collectCtCandidates(
     }
 
     /*
-     * We only need CT observations
-     * inside the requested discovery window.
+     * CT observation must be recent.
      */
 
     if (
       !certificateDate ||
-      certificateDate.getTime() < cutoff
+      certificateDate.getTime() <
+        cutoff
     ) {
       continue;
     }
 
     for (const rawName of names) {
       const domain =
-        normalizeDomain(rawName);
+        normalizeDomain(
+          rawName
+        );
 
       if (!domain) {
         continue;
       }
 
-      if (!domain.endsWith(tld)) {
-        continue;
-      }
-
-      const suffixStart =
-        domain.length -
-        tld.length;
-
-      if (suffixStart <= 0) {
+      if (
+        !domain.endsWith(tld)
+      ) {
         continue;
       }
 
@@ -421,18 +580,24 @@ function collectCtCandidates(
         certificateDate.toISOString();
 
       const existing =
-        domains.get(domain);
+        map.get(domain);
 
       if (
         !existing ||
-        new Date(discoveredAt).getTime() >
-          new Date(existing.discoveredAt).getTime()
+        new Date(
+          discoveredAt
+        ).getTime() >
+          new Date(
+            existing.discoveredAt
+          ).getTime()
       ) {
-        domains.set(
+        map.set(
           domain,
           {
             domain,
+
             discoveredAt,
+
             discoveryEvidence:
               "certificate-transparency"
           }
@@ -443,7 +608,7 @@ function collectCtCandidates(
 
   return {
     candidates:
-      [...domains.values()],
+      [...map.values()],
 
     rowsWithNames,
 
@@ -453,34 +618,24 @@ function collectCtCandidates(
 
 
 /* =========================================================
- * RDAP REGISTRATION VERIFICATION
+ * RDAP
  * ========================================================= */
 
 function extractRegistrationDate(
   rdap
 ) {
   const events =
-    Array.isArray(rdap?.events)
+    Array.isArray(
+      rdap?.events
+    )
       ? rdap.events
       : [];
 
-  /*
-   * IMPORTANT:
-   * Only an actual RDAP "registration"
-   * event is accepted.
-   *
-   * expiration,
-   * last changed,
-   * transfer,
-   * last update
-   * are NOT registration dates.
-   */
-
-  const registration =
-    events.find(event => {
+  const event =
+    events.find(item => {
       return (
         String(
-          event?.eventAction || ""
+          item?.eventAction || ""
         )
           .trim()
           .toLowerCase() ===
@@ -488,13 +643,13 @@ function extractRegistrationDate(
       );
     });
 
-  if (!registration?.eventDate) {
+  if (!event?.eventDate) {
     return null;
   }
 
   const date =
     new Date(
-      registration.eventDate
+      event.eventDate
     );
 
   if (
@@ -528,8 +683,7 @@ async function verifyRegistration(
       verified: false,
       registeredAt: null,
       error:
-        result.error ||
-        "RDAP verification failed"
+        result.error
     };
   }
 
@@ -543,14 +697,16 @@ async function verifyRegistration(
       verified: false,
       registeredAt: null,
       error:
-        "RDAP returned no authoritative registration event"
+        "RDAP registration event not found"
     };
   }
 
   return {
     verified: true,
+
     registeredAt:
       registeredAt.toISOString(),
+
     error: null
   };
 }
@@ -584,8 +740,7 @@ async function runWithConcurrency(
       try {
         results[index] =
           await worker(
-            items[index],
-            index
+            items[index]
           );
       } catch (error) {
         results[index] = {
@@ -594,11 +749,11 @@ async function runWithConcurrency(
           registrationVerified:
             false,
 
-          registeredAt:
-            null,
-
           registrationInWindow:
             false,
+
+          registeredAt:
+            null,
 
           registrationError:
             error?.message ||
@@ -662,59 +817,162 @@ export default async function handler(
     if (!tld) {
       return res.status(400).json({
         ok: false,
-        error: "Invalid TLD"
+        error:
+          "Invalid TLD"
       });
     }
 
-    const now =
-      Date.now();
-
     const cutoff =
-      now -
+      Date.now() -
       periodHours *
       60 *
       60 *
       1000;
 
-    /* ---------------------------------------------
-     * CT DISCOVERY
-     * ------------------------------------------- */
 
-    let rows;
+    /* =====================================================
+     * SOURCE 1: CRT.SH
+     * SOURCE 2: CTLOGS.DEV
+     *
+     * IMPORTANT:
+     * One source failing does NOT abort discovery.
+     * ===================================================== */
 
-    try {
-      rows =
-        await queryCrtSh(tld);
-    } catch (error) {
-      console.error(
-        "CT discovery failed:",
-        error
+    const [
+      crtResult,
+      ctlogsResult
+    ] =
+      await Promise.all([
+        queryCrtSh(tld),
+        queryCtlogsDev(tld)
+      ]);
+
+
+    const successfulSources =
+      [
+        crtResult,
+        ctlogsResult
+      ].filter(
+        source =>
+          source.ok
       );
 
+
+    /*
+     * If BOTH sources fail,
+     * then discovery genuinely failed.
+     */
+
+    if (
+      successfulSources.length === 0
+    ) {
       return res.status(502).json({
         ok: false,
+
         stage:
           "ct-discovery",
+
         error:
-          error?.message ||
-          "Certificate Transparency discovery failed"
+          "All Certificate Transparency sources failed",
+
+        sources: {
+          crtSh: {
+            ok:
+              crtResult.ok,
+
+            error:
+              crtResult.error,
+
+            url:
+              crtResult.url
+          },
+
+          ctlogsDev: {
+            ok:
+              ctlogsResult.ok,
+
+            error:
+              ctlogsResult.error,
+
+            url:
+              ctlogsResult.url
+          }
+        }
       });
     }
 
+
+    /* =====================================================
+     * MERGE CT SOURCES
+     * ===================================================== */
+
+    const mergedRows =
+      [
+        ...crtResult.rows,
+        ...ctlogsResult.rows
+      ];
+
+
+    /*
+     * Deduplicate exact CT rows by JSON.
+     */
+
+    const uniqueRows =
+      [];
+
+    const rowKeys =
+      new Set();
+
+    for (
+      const row
+      of mergedRows
+    ) {
+      let key;
+
+      try {
+        key =
+          JSON.stringify(row);
+      } catch {
+        key =
+          String(row);
+      }
+
+      if (
+        rowKeys.has(key)
+      ) {
+        continue;
+      }
+
+      rowKeys.add(key);
+
+      uniqueRows.push(
+        row
+      );
+
+      if (
+        uniqueRows.length >=
+        MAX_DISCOVERY_ROWS
+      ) {
+        break;
+      }
+    }
+
+
     const ctData =
       collectCtCandidates(
-        rows,
+        uniqueRows,
         tld,
         cutoff
       );
+
 
     const ctCandidates =
       ctData.candidates;
 
 
-    /* ---------------------------------------------
-     * HARD RDAP REGISTRATION GATE
-     * ------------------------------------------- */
+    /* =====================================================
+     * RDAP REGISTRATION VERIFICATION
+     * ===================================================== */
 
     const verifiedRecords =
       await runWithConcurrency(
@@ -726,10 +984,6 @@ export default async function handler(
               candidate.domain
             );
 
-          /*
-           * NO registration date:
-           * reject completely.
-           */
 
           if (
             !verification.verified ||
@@ -747,53 +1001,29 @@ export default async function handler(
               registrationInWindow:
                 false,
 
+              registrationSource:
+                "RDAP",
+
               registrationError:
                 verification.error ||
-                "Registration date not verified"
+                "Registration not verified"
             };
           }
+
 
           const registrationTime =
             new Date(
               verification.registeredAt
             ).getTime();
 
-          const insideWindow =
+
+          const registrationInWindow =
             registrationTime >=
               cutoff &&
             registrationTime <=
               Date.now() +
                 FUTURE_TOLERANCE_MS;
 
-          /*
-           * Registration verified but old:
-           * reject.
-           */
-
-          if (!insideWindow) {
-            return {
-              ...candidate,
-
-              registeredAt:
-                verification.registeredAt,
-
-              registrationVerified:
-                true,
-
-              registrationInWindow:
-                false,
-
-              registrationSource:
-                "RDAP",
-
-              registrationError:
-                "Verified registration date is outside selected period"
-            };
-          }
-
-          /*
-           * FINAL VERIFIED NEW REGISTRATION
-           */
 
           return {
             ...candidate,
@@ -804,22 +1034,23 @@ export default async function handler(
             registrationVerified:
               true,
 
-            registrationInWindow:
-              true,
+            registrationInWindow,
 
             registrationSource:
               "RDAP",
 
             registrationError:
-              null
+              registrationInWindow
+                ? null
+                : "Registration date outside selected period"
           };
         }
       );
 
 
-    /* ---------------------------------------------
-     * ONLY VERIFIED NEW REGISTRATIONS CONTINUE
-     * ------------------------------------------- */
+    /* =====================================================
+     * FINAL VERIFIED DOMAINS
+     * ===================================================== */
 
     const domains =
       verifiedRecords.filter(
@@ -854,9 +1085,9 @@ export default async function handler(
       domains.length;
 
 
-    /* ---------------------------------------------
+    /* =====================================================
      * RESPONSE
-     * ------------------------------------------- */
+     * ===================================================== */
 
     return res.status(200).json({
       ok: true,
@@ -884,19 +1115,51 @@ export default async function handler(
 
       sourceStatus: {
         crtSh: {
-          ok: true,
-          rows: rows.length
+          ok:
+            crtResult.ok,
+
+          rows:
+            crtResult.rows.length,
+
+          error:
+            crtResult.error,
+
+          url:
+            crtResult.url
+        },
+
+        ctlogsDev: {
+          ok:
+            ctlogsResult.ok,
+
+          rows:
+            ctlogsResult.rows.length,
+
+          error:
+            ctlogsResult.error,
+
+          url:
+            ctlogsResult.url
         },
 
         registration: {
-          source: "RDAP",
-          required: true
+          source:
+            "RDAP",
+
+          required:
+            true
         }
       },
 
       statistics: {
         ctRows:
-          rows.length,
+          uniqueRows.length,
+
+        crtShRows:
+          crtResult.rows.length,
+
+        ctlogsDevRows:
+          ctlogsResult.rows.length,
 
         ctRowsWithNames:
           ctData.rowsWithNames,
@@ -918,7 +1181,8 @@ export default async function handler(
         outsideWindow,
 
         elapsedMs:
-          Date.now() - started
+          Date.now() -
+          started
       }
     });
 
@@ -939,4 +1203,4 @@ export default async function handler(
         "Discovery failed"
     });
   }
-}
+    }
