@@ -1,0 +1,11 @@
+{
+  "name": "LD76 Investment Radar",
+  "short_name": "LD76 Radar",
+  "description": "Research newly discovered investment websites and analyze scam indicators.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "orientation": "portrait-primary"
+}
