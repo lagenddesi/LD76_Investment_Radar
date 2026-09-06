@@ -2,6 +2,8 @@ const DEFAULT_MODEL = "gemini-2.5-flash";
 
 const MAX_CANDIDATES_PER_REQUEST = 30;
 const MAX_EVIDENCE_CHARS = 12000;
+const GEMINI_TIMEOUT_MS = 30000;
+
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -11,15 +13,47 @@ export default async function handler(req, res) {
     });
   }
 
-  const enabled =
-    String(
-      process.env.GEMINI_ENABLED || "false"
-    ).toLowerCase() === "true";
+  const apiKey =
+    process.env.GEMINI_API_KEY;
 
   /*
-   * Gemini can be disabled during development.
-   * The application must continue working.
+   * Gemini is automatically enabled when
+   * a valid API key is configured.
+   *
+   * GEMINI_ENABLED is still supported:
+   * explicitly setting it to "false" disables AI.
    */
+
+  const explicitlyDisabled =
+    String(
+      process.env.GEMINI_ENABLED || ""
+    ).toLowerCase() === "false";
+
+  const enabled =
+    Boolean(apiKey) &&
+    !explicitlyDisabled;
+
+
+  /*
+   * No API key.
+   */
+
+  if (!apiKey) {
+    return res.status(503).json({
+      ok: false,
+      enabled: false,
+      requestCount: 0,
+      results: [],
+      error:
+        "Gemini API key is not configured in Vercel Environment Variables."
+    });
+  }
+
+
+  /*
+   * Explicitly disabled.
+   */
+
   if (!enabled) {
     return res.status(200).json({
       ok: true,
@@ -27,21 +61,10 @@ export default async function handler(req, res) {
       requestCount: 0,
       results: [],
       message:
-        "Gemini analysis is disabled."
+        "Gemini analysis is disabled by GEMINI_ENABLED=false."
     });
   }
 
-  const apiKey =
-    process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    return res.status(503).json({
-      ok: false,
-      enabled: true,
-      error:
-        "Gemini API key is not configured."
-    });
-  }
 
   try {
     const body =
@@ -52,6 +75,7 @@ export default async function handler(req, res) {
         ? body.candidates
         : [];
 
+
     if (!candidates.length) {
       return res.status(200).json({
         ok: true,
@@ -61,21 +85,26 @@ export default async function handler(req, res) {
       });
     }
 
+
     /*
-     * No arbitrary 4/5-site limit.
+     * IMPORTANT:
      *
-     * We normally send all candidates together.
-     * If there are too many for one safe request,
-     * the smallest necessary number of batches
-     * is created.
+     * There is NO 4/5 candidate limit.
+     *
+     * Up to 30 candidates are sent per Gemini
+     * request. More than 30 are split into the
+     * smallest required number of batches.
      */
+
     const batches =
       createBatches(
         candidates,
         MAX_CANDIDATES_PER_REQUEST
       );
 
+
     const allResults = [];
+
 
     for (
       const batch
@@ -92,37 +121,61 @@ export default async function handler(req, res) {
       );
     }
 
+
     /*
-     * Keep result order predictable.
+     * Keep result order equal to
+     * candidate order.
      */
+
     const inputOrder =
       new Map(
         candidates.map(
           (candidate, index) => [
-            candidate.domain,
+            normalizeDomain(
+              candidate?.domain
+            ),
             index
           ]
         )
       );
 
+
     allResults.sort(
       (a, b) =>
         (
-          inputOrder.get(a.domain) ?? 999999
+          inputOrder.get(
+            normalizeDomain(
+              a?.domain
+            )
+          ) ?? 999999
         ) -
         (
-          inputOrder.get(b.domain) ?? 999999
+          inputOrder.get(
+            normalizeDomain(
+              b?.domain
+            )
+          ) ?? 999999
         )
     );
+
 
     return res.status(200).json({
       ok: true,
       enabled: true,
+
       requestCount:
         batches.length,
+
+      submittedCount:
+        candidates.length,
+
+      resultCount:
+        allResults.length,
+
       results:
         allResults
     });
+
 
   } catch (error) {
     console.error(
@@ -130,15 +183,18 @@ export default async function handler(req, res) {
       error
     );
 
+
     const status =
       getGeminiErrorStatus(
         error
       );
 
+
     return res.status(status).json({
       ok: false,
       enabled: true,
       requestCount: 0,
+
       error:
         getUserFriendlyGeminiError(
           error
@@ -148,9 +204,9 @@ export default async function handler(req, res) {
 }
 
 
-/* ================================================== */
-/* GEMINI BATCH                                       */
-/* ================================================== */
+/* =========================================================
+   GEMINI BATCH
+========================================================= */
 
 async function analyzeBatch(
   candidates,
@@ -160,24 +216,34 @@ async function analyzeBatch(
     process.env.GEMINI_MODEL ||
     DEFAULT_MODEL;
 
+
   const prompt =
     buildPrompt(
       candidates
     );
 
+
   const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(
+      apiKey
+    )}`;
+
 
   const controller =
     new AbortController();
 
+
   const timeout =
     setTimeout(
       () => controller.abort(),
-      30000
+      GEMINI_TIMEOUT_MS
     );
 
+
   let response;
+
 
   try {
     response =
@@ -199,6 +265,7 @@ async function analyzeBatch(
               contents: [
                 {
                   role: "user",
+
                   parts: [
                     {
                       text: prompt
@@ -216,8 +283,12 @@ async function analyzeBatch(
             })
         }
       );
+
   } catch (error) {
-    clearTimeout(timeout);
+    clearTimeout(
+      timeout
+    );
+
 
     if (
       error?.name ===
@@ -228,28 +299,39 @@ async function analyzeBatch(
       );
     }
 
+
     throw new Error(
       "GEMINI_NETWORK_ERROR"
     );
   }
 
-  clearTimeout(timeout);
+
+  clearTimeout(
+    timeout
+  );
+
 
   if (!response.ok) {
     let errorBody = "";
 
+
     try {
       errorBody =
         await response.text();
-    } catch (error) {
-      // Ignore response parsing error.
+    } catch {
+      // Ignore.
     }
+
 
     console.error(
       "Gemini HTTP error:",
       response.status,
-      errorBody.slice(0, 2000)
+      errorBody.slice(
+        0,
+        3000
+      )
     );
+
 
     if (
       response.status === 429
@@ -258,6 +340,7 @@ async function analyzeBatch(
         "GEMINI_QUOTA"
       );
     }
+
 
     if (
       response.status === 401 ||
@@ -268,6 +351,7 @@ async function analyzeBatch(
       );
     }
 
+
     if (
       response.status >= 500
     ) {
@@ -276,51 +360,90 @@ async function analyzeBatch(
       );
     }
 
+
     throw new Error(
       "GEMINI_REQUEST_ERROR"
     );
   }
 
+
   let data;
+
 
   try {
     data =
       await response.json();
-  } catch (error) {
+
+  } catch {
     throw new Error(
       "GEMINI_INVALID_RESPONSE"
     );
   }
+
+
+  /*
+   * Log only structural information.
+   * NEVER log API key.
+   */
+
+  console.log(
+    "Gemini response received:",
+    {
+      model,
+      candidateCount:
+        Array.isArray(
+          data?.candidates
+        )
+          ? data.candidates.length
+          : 0,
+
+      hasPromptFeedback:
+        Boolean(
+          data?.promptFeedback
+        )
+    }
+  );
+
 
   const text =
     extractGeminiText(
       data
     );
 
+
   if (!text) {
+    console.error(
+      "Gemini returned no text:",
+      JSON.stringify(
+        data
+      ).slice(
+        0,
+        5000
+      )
+    );
+
     throw new Error(
       "GEMINI_EMPTY_RESPONSE"
     );
   }
+
 
   const parsed =
     parseGeminiJson(
       text
     );
 
-  const validated =
-    validateResults(
-      parsed,
-      candidates
-    );
 
-  return validated;
+  return validateResults(
+    parsed,
+    candidates
+  );
 }
 
 
-/* ================================================== */
-/* PROMPT                                             */
-/* ================================================== */
+/* =========================================================
+   PROMPT
+========================================================= */
 
 function buildPrompt(
   candidates
@@ -328,11 +451,14 @@ function buildPrompt(
   const evidence =
     candidates
       .map(
-        (candidate, index) => {
-          return [
+        (candidate, index) =>
+          [
             `CANDIDATE ${index + 1}`,
 
-            `Domain: ${candidate.domain || "Unknown"}`,
+            `Domain: ${
+              candidate.domain ||
+              "Unknown"
+            }`,
 
             `Website name: ${
               candidate.websiteName ||
@@ -433,39 +559,39 @@ function buildPrompt(
 
             `Website evidence:\n${
               String(
-                candidate.content || ""
+                candidate.content ||
+                ""
+              ).slice(
+                0,
+                MAX_EVIDENCE_CHARS
               )
-                .slice(
-                  0,
-                  MAX_EVIDENCE_CHARS
-                )
             }`
-          ].join("\n");
-        }
+          ].join("\n")
       )
       .join(
         "\n\n==============================\n\n"
       );
 
+
   return `
 You are the AI analysis engine for LD76 Investment Radar.
 
-Your task is to analyze newly discovered websites that appear to be related to investment, earning, deposits, returns, referrals, or similar financial opportunities.
+Analyze newly discovered websites that appear related to investment, earning, deposits, returns, referrals, or similar financial opportunities.
 
-IMPORTANT:
+IMPORTANT RULES:
+
 - Do NOT automatically classify a website as a scam merely because it is new.
-- Do NOT assume that every investment or HYIP-style website is fraudulent.
+- Do NOT assume every investment or HYIP-style website is fraudulent.
 - Do NOT invent company registrations, licenses, people, addresses, payment methods, returns, or other facts.
-- Use ONLY the supplied evidence.
-- "Unknown", "not verified", or missing information is not automatically proof of fraud.
+- Use ONLY supplied evidence.
+- Unknown or unverified information is not automatically proof of fraud.
 - Missing transparency can be a risk indicator, but distinguish it from confirmed evidence.
 - Telegram, WhatsApp, Discord, or social-media support is NOT automatically a scam indicator.
-- ROI or profit claims are NOT by themselves proof of a scam.
-- Consider the total evidence and the strength of each signal.
-- If evidence is insufficient, lower confidence and explain what remains unknown.
+- ROI or profit claims alone are NOT proof of fraud.
+- Consider the total evidence.
+- If evidence is insufficient, use lower confidence.
 
 SCORING:
-Return a GEMINI SCAM SCORE from 0 to 100.
 
 0-20   = Very Low Scam Indicators
 21-40  = Low
@@ -473,115 +599,21 @@ Return a GEMINI SCAM SCORE from 0 to 100.
 61-80  = Suspicious
 81-100 = Highly Suspicious
 
-The score represents the strength of scam-related indicators in the supplied evidence, NOT legal proof that the website is a scam.
+The score represents scam-related indicators in the supplied evidence, NOT legal proof that a website is a scam.
 
-Analyze these areas:
+Analyze:
 
-1. Company / business registration
-- Company identity
-- Registration number
-- Registration authority
-- Country
-- Regulatory/license information
-- Physical address
-- Directors/team
-- Whether the supplied information appears verifiable
-- Never claim verification unless evidence supports it.
-
-2. Privacy and legal information
-- Privacy Policy
-- Terms
-- Refund policy
-- Withdrawal information
-- Risk disclosure
-- Legal disclaimer
-- Cookie policy
-- Distinguish meaningful pages from placeholders.
-
+1. Company/business registration
+2. Privacy/legal information
 3. About/company transparency
-- Business identity
-- History
-- Management
-- Team
-- Address
-- Business model
-- Internal consistency
-
 4. Support/contact
-- Email
-- Phone
-- Physical address
-- Contact page
-- Live chat
-- Ticket system
-- FAQ
-- Telegram
-- WhatsApp
-- Discord
-- Social links
-Do not automatically treat any individual support method as proof of fraud.
-
 5. Payment methods
-Pay special attention to:
-- Bank transfer
-- Bank deposit
-- Bank account
-- Easypaisa
-- JazzCash
-- PKR
-- IBAN
-- Account number
-- Account title
-- USDT
-- TRC20
-- ERC20
-- BEP20
-- Bitcoin
-- Ethereum
-- PayPal
-Do not automatically classify a site as fraudulent because it uses crypto or Pakistani payment methods.
+6. Investment/earning claims
+7. Referral/affiliate structure
+8. Website/technical evidence
 
-6. Investment and earning claims
-Look for:
-- Investment
-- Deposit
-- Profit
-- Return
-- ROI
-- Daily profit
-- Daily income
-- Fixed return
-- Guaranteed return
-- Passive income
-- Withdrawal
-- Maturity
-- Investment plans
-- Numerical percentage claims
+For EVERY supplied candidate return:
 
-7. Referral / affiliate structure
-Look for:
-- Referral bonus
-- Affiliate
-- MLM-style structure
-- Commissions
-- Invite-and-earn
-- Team income
-- Level bonuses
-Referral systems alone are not proof of fraud.
-
-8. Website / technical evidence
-Consider:
-- HTTPS
-- HTTP status
-- Redirects
-- Domain discovery information
-- Missing pages
-- Broken/placeholder content
-- Suspiciously inconsistent information
-- Website structure
-Do not treat normal technical errors alone as proof of fraud.
-
-For every candidate, return:
 - domain
 - websiteName
 - scamScore
@@ -594,9 +626,9 @@ For every candidate, return:
 - investmentClaims
 - paymentMethods
 
-Use concise strings in arrays.
+Return ONLY valid JSON.
 
-Return ONLY valid JSON in this exact structure:
+EXACT STRUCTURE:
 
 {
   "results": [
@@ -606,30 +638,23 @@ Return ONLY valid JSON in this exact structure:
       "scamScore": 75,
       "classification": "Suspicious",
       "confidence": "Medium",
-      "summary": "Short evidence-based explanation.",
-      "redFlags": [
-        "Evidence-based red flag"
-      ],
-      "positiveSignals": [
-        "Evidence-based positive signal"
-      ],
-      "missingInformation": [
-        "Information that could not be verified"
-      ],
-      "investmentClaims": [
-        "Claim found in supplied evidence"
-      ],
-      "paymentMethods": [
-        "Bank",
-        "Easypaisa"
-      ]
+      "summary": "Evidence-based explanation.",
+      "redFlags": [],
+      "positiveSignals": [],
+      "missingInformation": [],
+      "investmentClaims": [],
+      "paymentMethods": []
     }
   ]
 }
 
-The number of results MUST match the candidates supplied.
-Do not omit candidates.
-Do not add domains that were not supplied.
+CRITICAL:
+
+- Return exactly one result for every supplied candidate.
+- Do not omit candidates.
+- Do not invent candidates.
+- Keep each domain exactly matched to the supplied candidate.
+- scamScore MUST be a number from 0 to 100.
 
 CANDIDATE EVIDENCE:
 
@@ -638,15 +663,16 @@ ${evidence}
 }
 
 
-/* ================================================== */
-/* RESPONSE PARSING                                   */
-/* ================================================== */
+/* =========================================================
+   GEMINI TEXT EXTRACTION
+========================================================= */
 
 function extractGeminiText(
   data
 ) {
   const candidates =
     data?.candidates;
+
 
   if (
     !Array.isArray(candidates) ||
@@ -655,8 +681,12 @@ function extractGeminiText(
     return "";
   }
 
+
   const parts =
-    candidates[0]?.content?.parts;
+    candidates[0]
+      ?.content
+      ?.parts;
+
 
   if (
     !Array.isArray(parts)
@@ -664,10 +694,12 @@ function extractGeminiText(
     return "";
   }
 
+
   return parts
     .map(
       part =>
-        typeof part.text === "string"
+        typeof part?.text ===
+        "string"
           ? part.text
           : ""
     )
@@ -676,6 +708,10 @@ function extractGeminiText(
 }
 
 
+/* =========================================================
+   JSON PARSER
+========================================================= */
+
 function parseGeminiJson(
   text
 ) {
@@ -683,10 +719,7 @@ function parseGeminiJson(
     String(text || "")
       .trim();
 
-  /*
-   * Gemini may occasionally wrap JSON
-   * inside a markdown code fence.
-   */
+
   cleaned =
     cleaned
       .replace(
@@ -703,20 +736,23 @@ function parseGeminiJson(
       )
       .trim();
 
+
   try {
     return JSON.parse(
       cleaned
     );
-  } catch (error) {
-    /*
-     * Attempt to recover a JSON object
-     * if extra text surrounds it.
-     */
+
+  } catch {
     const start =
-      cleaned.indexOf("{");
+      cleaned.indexOf(
+        "{"
+      );
 
     const end =
-      cleaned.lastIndexOf("}");
+      cleaned.lastIndexOf(
+        "}"
+      );
+
 
     if (
       start !== -1 &&
@@ -729,10 +765,11 @@ function parseGeminiJson(
             end + 1
           )
         );
-      } catch (nestedError) {
-        // Fall through.
+      } catch {
+        // Continue.
       }
     }
+
 
     throw new Error(
       "GEMINI_MALFORMED_JSON"
@@ -741,21 +778,25 @@ function parseGeminiJson(
 }
 
 
-/* ================================================== */
-/* VALIDATION                                         */
-/* ================================================== */
+/* =========================================================
+   VALIDATION
+========================================================= */
 
 function validateResults(
   data,
   candidates
 ) {
   const rawResults =
-    Array.isArray(data?.results)
+    Array.isArray(
+      data?.results
+    )
       ? data.results
       : [];
 
+
   const byDomain =
     new Map();
+
 
   for (
     const result
@@ -766,48 +807,70 @@ function validateResults(
         result?.domain
       );
 
+
     if (!domain) {
       continue;
     }
 
-    byDomain.set(
-      domain,
+
+    const normalized =
       normalizeResult(
         result
-      )
+      );
+
+
+    /*
+     * Only store actual valid scores.
+     */
+
+    if (
+      normalized.scamScore ===
+      null
+    ) {
+      continue;
+    }
+
+
+    byDomain.set(
+      domain,
+      normalized
     );
   }
 
+
   /*
-   * Every submitted candidate must receive
-   * a result. If Gemini omitted one, create a
-   * safe "insufficient response" result rather
-   * than inventing a score.
+   * Return one result for every candidate.
+   *
+   * Missing Gemini result gets scamScore:null.
+   * Frontend will NOT save it as aiAnalyzed.
    */
+
   return candidates.map(
     candidate => {
       const domain =
         normalizeDomain(
-          candidate.domain
+          candidate?.domain
         );
+
 
       const result =
         byDomain.get(
           domain
         );
 
+
       if (result) {
         return result;
       }
 
+
       return {
-        domain:
-          candidate.domain,
+        domain,
 
         websiteName:
-          candidate.websiteName ||
-          candidate.title ||
-          candidate.domain,
+          candidate?.websiteName ||
+          candidate?.title ||
+          domain,
 
         scamScore: null,
 
@@ -818,20 +881,20 @@ function validateResults(
           "Unknown",
 
         summary:
-          "Gemini did not return a valid analysis for this candidate.",
+          "Gemini did not return a valid scored analysis for this candidate.",
 
         redFlags: [],
 
         positiveSignals: [],
 
         missingInformation: [
-          "Valid Gemini analysis was not returned."
+          "Valid Gemini score was not returned."
         ],
 
         investmentClaims: [],
 
         paymentMethods:
-          candidate.paymentMethods
+          candidate?.paymentMethods
             ?.detected || []
       };
     }
@@ -839,23 +902,28 @@ function validateResults(
 }
 
 
+/* =========================================================
+   RESULT NORMALIZATION
+========================================================= */
+
 function normalizeResult(
   result
 ) {
   const score =
     normalizeScore(
-      result.scamScore
+      result?.scamScore
     );
+
 
   return {
     domain:
       normalizeDomain(
-        result.domain
+        result?.domain
       ),
 
     websiteName:
       cleanString(
-        result.websiteName
+        result?.websiteName
       ),
 
     scamScore:
@@ -865,44 +933,43 @@ function normalizeResult(
       score === null
         ? "Analysis Unavailable"
         : normalizeClassification(
-            score,
-            result.classification
+            score
           ),
 
     confidence:
       normalizeConfidence(
-        result.confidence
+        result?.confidence
       ),
 
     summary:
       cleanString(
-        result.summary
+        result?.summary
       ) ||
       "No summary was returned.",
 
     redFlags:
       normalizeArray(
-        result.redFlags
+        result?.redFlags
       ),
 
     positiveSignals:
       normalizeArray(
-        result.positiveSignals
+        result?.positiveSignals
       ),
 
     missingInformation:
       normalizeArray(
-        result.missingInformation
+        result?.missingInformation
       ),
 
     investmentClaims:
       normalizeArray(
-        result.investmentClaims
+        result?.investmentClaims
       ),
 
     paymentMethods:
       normalizeArray(
-        result.paymentMethods
+        result?.paymentMethods
       )
   };
 }
@@ -914,11 +981,13 @@ function normalizeScore(
   const number =
     Number(value);
 
+
   if (
     !Number.isFinite(number)
   ) {
     return null;
   }
+
 
   return Math.max(
     0,
@@ -931,30 +1000,21 @@ function normalizeScore(
 
 
 function normalizeClassification(
-  score,
-  supplied
+  score
 ) {
-  if (
-    score <= 20
-  ) {
+  if (score <= 20) {
     return "Very Low Scam Indicators";
   }
 
-  if (
-    score <= 40
-  ) {
+  if (score <= 40) {
     return "Low";
   }
 
-  if (
-    score <= 60
-  ) {
+  if (score <= 60) {
     return "Moderate / Uncertain";
   }
 
-  if (
-    score <= 80
-  ) {
+  if (score <= 80) {
     return "Suspicious";
   }
 
@@ -970,21 +1030,16 @@ function normalizeConfidence(
       value
     ).toLowerCase();
 
-  if (
-    text === "high"
-  ) {
+
+  if (text === "high") {
     return "High";
   }
 
-  if (
-    text === "medium"
-  ) {
+  if (text === "medium") {
     return "Medium";
   }
 
-  if (
-    text === "low"
-  ) {
+  if (text === "low") {
     return "Low";
   }
 
@@ -1001,25 +1056,30 @@ function normalizeArray(
     return [];
   }
 
+
   return value
     .map(
       item =>
         cleanString(item)
     )
     .filter(Boolean)
-    .slice(0, 30);
+    .slice(
+      0,
+      30
+    );
 }
 
 
-/* ================================================== */
-/* BATCHING                                           */
-/* ================================================== */
+/* =========================================================
+   BATCHING
+========================================================= */
 
 function createBatches(
   candidates,
   maxPerBatch
 ) {
   const batches = [];
+
 
   for (
     let i = 0;
@@ -1034,13 +1094,14 @@ function createBatches(
     );
   }
 
+
   return batches;
 }
 
 
-/* ================================================== */
-/* HELPERS                                            */
-/* ================================================== */
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function formatArray(
   value
@@ -1052,8 +1113,12 @@ function formatArray(
     return "None detected";
   }
 
+
   return value
-    .slice(0, 30)
+    .slice(
+      0,
+      30
+    )
     .map(
       item =>
         String(item)
@@ -1072,9 +1137,15 @@ function formatSnippets(
     return "No relevant snippets available.";
   }
 
+
   return value
-    .slice(0, 25)
-    .join("\n---\n")
+    .slice(
+      0,
+      25
+    )
+    .join(
+      "\n---\n"
+    )
     .slice(
       0,
       8000
@@ -1086,9 +1157,12 @@ function normalizeDomain(
   value
 ) {
   let domain =
-    String(value || "")
+    String(
+      value || ""
+    )
       .trim()
       .toLowerCase();
+
 
   domain =
     domain
@@ -1099,9 +1173,18 @@ function normalizeDomain(
       .split("/")[0]
       .split(":")[0]
       .replace(
+        /^www\./,
+        ""
+      )
+      .replace(
         /^\*\./,
         ""
+      )
+      .replace(
+        /\.$/,
+        ""
       );
+
 
   return domain;
 }
@@ -1117,19 +1200,23 @@ function cleanString(
     return "";
   }
 
+
   return String(value)
     .replace(
       /\s+/g,
       " "
     )
     .trim()
-    .slice(0, 2000);
+    .slice(
+      0,
+      2000
+    );
 }
 
 
-/* ================================================== */
-/* ERROR HANDLING                                     */
-/* ================================================== */
+/* =========================================================
+   ERROR HANDLING
+========================================================= */
 
 function getGeminiErrorStatus(
   error
@@ -1165,26 +1252,30 @@ function getUserFriendlyGeminiError(
     error?.message
   ) {
     case "GEMINI_QUOTA":
-      return "AI analysis unavailable. Gemini quota or service limit was reached. Local scan results are still available.";
+      return "Gemini quota or service limit was reached.";
 
     case "GEMINI_AUTH":
-      return "AI analysis unavailable. Gemini API configuration or authentication failed.";
+      return "Gemini API authentication failed. Check GEMINI_API_KEY.";
 
     case "GEMINI_TIMEOUT":
-      return "AI analysis unavailable. Gemini request timed out. Local scan results are still available.";
+      return "Gemini request timed out.";
 
     case "GEMINI_NETWORK_ERROR":
-      return "AI analysis unavailable. Gemini could not be reached. Local scan results are still available.";
+      return "Gemini could not be reached.";
 
     case "GEMINI_MALFORMED_JSON":
+      return "Gemini returned malformed JSON.";
+
     case "GEMINI_INVALID_RESPONSE":
+      return "Gemini returned an invalid API response.";
+
     case "GEMINI_EMPTY_RESPONSE":
-      return "AI analysis unavailable. Gemini returned an invalid response. Local scan results are still available.";
+      return "Gemini returned an empty response.";
 
     case "GEMINI_SERVICE":
-      return "AI analysis unavailable. Gemini service is temporarily unavailable. Local scan results are still available.";
+      return "Gemini service is temporarily unavailable.";
 
     default:
-      return "AI analysis unavailable. Gemini could not complete the analysis. Local scan results are still available.";
+      return "Gemini could not complete the analysis.";
   }
 }
