@@ -1,22 +1,27 @@
 "use strict";
 
 /*
- * LD76 Investment Radar
- * Website scanner
+ * LD76 INVESTMENT RADAR
  *
- * Strategy:
- * 1. Scan all supplied domains in parallel.
- * 2. Inspect raw HTML + extracted text + URLs.
- * 3. Detect investment/earning signals.
- * 4. Detect selected payment methods.
- * 5. Only promising domains receive deeper page scans.
+ * WEBSITE SCANNER
  *
- * No artificial 4/5 candidate limit.
+ * IMPORTANT:
+ *
+ * discover.js has already verified that the domain
+ * was recently registered using RDAP.
+ *
+ * This scanner now verifies that the domain is also
+ * a REAL ACTIVE WEBSITE.
+ *
+ * Parked / for-sale / registrar holding pages are
+ * rejected before investment/payment filtering.
+ *
+ * NO artificial 4/5 candidate limit.
  */
 
 const CONCURRENCY = 25;
 
-const REQUEST_TIMEOUT_MS = 4500;
+const REQUEST_TIMEOUT_MS = 5000;
 
 const MAX_HTML_BYTES = 350000;
 
@@ -25,9 +30,9 @@ const MAX_TEXT_CHARS = 90000;
 const MAX_DEEP_PAGES = 8;
 
 
-/* -------------------------------------------------------
+/* =========================================================
  * INVESTMENT / EARNING SIGNALS
- * ----------------------------------------------------- */
+ * ========================================================= */
 
 const INVESTMENT_PATTERNS = [
   /\binvest\b/i,
@@ -109,13 +114,10 @@ const INVESTMENT_PATTERNS = [
 ];
 
 
-/* -------------------------------------------------------
- * DAILY / ROI CLAIMS
- * ----------------------------------------------------- */
-
 const DAILY_RETURN_PATTERNS = [
   /\b\d+(?:\.\d+)?\s*%\s*(?:per\s*)?day\b/i,
   /\b\d+(?:\.\d+)?\s*%\s*daily\b/i,
+
   /\bdaily\s+profit\b/i,
   /\bdaily\s+return\b/i,
   /\bdaily\s+income\b/i,
@@ -134,10 +136,12 @@ const DAILY_RETURN_PATTERNS = [
   /\bguaranteed\s+profit\b/i,
   /\bguaranteed\s+return\b/i,
   /\bguaranteed\s+income\b/i,
+
   /\bfixed\s+profit\b/i,
   /\bfixed\s+return\b/i,
   /\bfixed\s+income\b/i
 ];
+
 
 const ROI_PATTERNS = [
   /\broi\b/i,
@@ -149,9 +153,9 @@ const ROI_PATTERNS = [
 ];
 
 
-/* -------------------------------------------------------
+/* =========================================================
  * PAYMENT METHODS
- * ----------------------------------------------------- */
+ * ========================================================= */
 
 const PAYMENT_PATTERNS = {
   bank: [
@@ -160,18 +164,20 @@ const PAYMENT_PATTERNS = {
     /\bbank\s+account\b/i,
     /\bbank\s+details\b/i,
     /\bbank\s+payment\b/i,
-    /\bbank\s+deposit\b/i,
+
     /\baccount\s+number\b/i,
     /\baccount\s+title\b/i,
     /\baccount\s+holder\b/i,
     /\baccount\s+name\b/i,
-    /\bibAN\b/i,
+
     /\biban\b/i,
     /\bpkr\b/i,
     /\bpakistani\s+rupees?\b/i,
     /\bpakistan\s+bank\b/i,
+
     /\bwire\s+transfer\b/i,
     /\bwire\s+payment\b/i,
+
     /\bhabib\s+bank\b/i,
     /\bhbl\b/i,
     /\bmeezan\b/i,
@@ -194,18 +200,22 @@ const PAYMENT_PATTERNS = {
 
   crypto: [
     /\busdt\b/i,
-    /\busdt\s*(?:trc20|erc20|bep20)?\b/i,
     /\btrc20\b/i,
     /\berc20\b/i,
     /\bbep20\b/i,
+
     /\bbitcoin\b/i,
     /\bbtc\b/i,
+
     /\bethereum\b/i,
     /\beth\b/i,
+
     /\bcrypto\b/i,
     /\bcryptocurrency\b/i,
+
     /\bcrypto\s+wallet\b/i,
     /\bwallet\s+address\b/i,
+
     /\busdc\b/i,
     /\bsolana\b/i,
     /\btron\b/i
@@ -213,9 +223,66 @@ const PAYMENT_PATTERNS = {
 };
 
 
-/* -------------------------------------------------------
- * RELEVANT PAGES
- * ----------------------------------------------------- */
+/* =========================================================
+ * PARKED / FOR-SALE DETECTION
+ * ========================================================= */
+
+const PARKED_PATTERNS = [
+  /\bdomain\s+for\s+sale\b/i,
+  /\bthis\s+domain\s+is\s+for\s+sale\b/i,
+  /\bthis\s+domain\s+is\s+available\s+for\s+purchase\b/i,
+  /\bbuy\s+(?:this\s+)?domain\b/i,
+  /\bbuy\s+domain\b/i,
+  /\bpurchase\s+(?:this\s+)?domain\b/i,
+
+  /\bdomain\s+name\s+for\s+sale\b/i,
+  /\bdomain\s+is\s+parked\b/i,
+  /\bparked\s+domain\b/i,
+  /\bdomain\s+parking\b/i,
+  /\bpark\s+this\s+domain\b/i,
+
+  /\bcoming\s+soon\b/i,
+  /\bunder\s+construction\b/i,
+
+  /\bmake\s+an\s+offer\s+for\s+this\s+domain\b/i,
+  /\bmake\s+offer\b/i,
+
+  /\bget\s+this\s+domain\b/i,
+  /\bown\s+this\s+domain\b/i,
+  /\bclaim\s+this\s+domain\b/i,
+
+  /\bdomain\s+marketplace\b/i,
+  /\bdomain\s+auction\b/i,
+
+  /\bsedo\b/i,
+  /\bafternic\b/i,
+  /\bdan\.com\b/i,
+  /\bgodaddy\s+domain\b/i,
+  /\bnamecheap\s+marketplace\b/i,
+
+  /\bhuge\s+domains\b/i,
+  /\bdomains\s+available\b/i,
+
+  /\bparkingcrew\b/i,
+  /\bparking\s+crew\b/i,
+
+  /\bthis\s+webpage\s+is\s+parked\b/i,
+  /\bwebsite\s+coming\s+soon\b/i
+];
+
+
+const PARKED_URL_PATTERNS = [
+  /sedo\.com/i,
+  /afternic\.com/i,
+  /dan\.com/i,
+  /godaddy\.com\/domain/i,
+  /namecheap\.com\/domains/i
+];
+
+
+/* =========================================================
+ * RELEVANT DEEP PAGES
+ * ========================================================= */
 
 const RELEVANT_PATHS = [
   "/about",
@@ -280,49 +347,63 @@ const RELEVANT_PATHS = [
 ];
 
 
-/* -------------------------------------------------------
+/* =========================================================
  * MAIN HANDLER
- * ----------------------------------------------------- */
+ * ========================================================= */
 
-export default async function handler(req, res) {
+export default async function handler(
+  req,
+  res
+) {
   if (req.method !== "POST") {
     return res.status(405).json({
       ok: false,
-      error: "Method not allowed. Use POST."
+      error:
+        "Method not allowed. Use POST."
     });
   }
 
   try {
-    const body = req.body || {};
+    const body =
+      req.body || {};
 
-    const rawDomains = Array.isArray(body.domains)
-      ? body.domains
-      : [];
+    const rawDomains =
+      Array.isArray(body.domains)
+        ? body.domains
+        : [];
 
-    const selectedPayments = normalizePayments(
-      body.paymentMethods
-    );
+    const selectedPayments =
+      normalizePayments(
+        body.paymentMethods
+      );
 
     /*
-     * IMPORTANT:
-     * Do NOT slice domains here.
-     *
-     * If discovery gives 381 domains,
-     * scanner receives all 381.
+     * NEVER LIMIT TO 4 OR 5.
      */
-    const domains = uniqueDomains(
-      rawDomains
-        .map(normalizeInputDomain)
-        .filter(Boolean)
-    );
+
+    const domains =
+      uniqueDomains(
+        rawDomains
+          .map(normalizeInputDomain)
+          .filter(Boolean)
+      );
 
     if (!domains.length) {
       return res.status(200).json({
         ok: true,
+
         scanned: 0,
+
         active: 0,
+
+        realActiveWebsites: 0,
+
+        parkedRejected: 0,
+
         investmentMatches: 0,
+
         paymentMatches: 0,
+
         candidates: []
       });
     }
@@ -340,8 +421,20 @@ export default async function handler(req, res) {
           results.push(result);
         } catch (error) {
           results.push({
-            domain: item.domain,
-            status: "error",
+            domain:
+              item.domain,
+
+            registeredAt:
+              item.registeredAt ||
+              null,
+
+            registrationVerified:
+              item.registrationVerified ===
+              true,
+
+            status:
+              "error",
+
             errors: [
               error?.message ||
               "Scanner worker failed"
@@ -351,16 +444,37 @@ export default async function handler(req, res) {
       }
     );
 
-    const active = results.filter(
-      item =>
-        item.status === "active"
-    );
+
+    const active =
+      results.filter(
+        item =>
+          item.status ===
+          "active"
+      );
+
+
+    const realActiveWebsites =
+      active.filter(
+        item =>
+          item.websiteType ===
+          "real-active-website"
+      );
+
+
+    const parkedRejected =
+      results.filter(
+        item =>
+          item.websiteType ===
+          "parked-or-for-sale"
+      );
+
 
     const investmentMatches =
-      active.filter(
+      realActiveWebsites.filter(
         item =>
           item.investment?.relevant
       );
+
 
     const paymentMatches =
       investmentMatches.filter(
@@ -371,9 +485,11 @@ export default async function handler(req, res) {
           )
       );
 
+
     /*
-     * No candidate limit.
+     * NO candidate limit.
      */
+
     const candidates =
       paymentMatches.sort(
         (a, b) =>
@@ -381,12 +497,20 @@ export default async function handler(req, res) {
           (a.investment?.score || 0)
       );
 
+
     return res.status(200).json({
       ok: true,
 
-      scanned: domains.length,
+      scanned:
+        domains.length,
 
-      active: active.length,
+      active:
+        active.length,
+
+      realActiveWebsites:
+        realActiveWebsites.length,
+
+      parkedRejected,
 
       investmentMatches:
         investmentMatches.length,
@@ -405,7 +529,10 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       ok: false,
-      error: "Website scanning failed",
+
+      error:
+        "Website scanning failed",
+
       message:
         error?.message ||
         "Unknown scanner error"
@@ -414,81 +541,142 @@ export default async function handler(req, res) {
 }
 
 
-/* -------------------------------------------------------
+/* =========================================================
  * DOMAIN SCANNER
- * ----------------------------------------------------- */
+ * ========================================================= */
 
-async function scanDomain(input) {
+async function scanDomain(
+  input
+) {
   const domain =
-    normalizeDomain(input?.domain);
+    normalizeDomain(
+      input?.domain
+    );
 
   const result = {
     domain,
 
     registeredAt:
-      input?.registeredAt || null,
+      input?.registeredAt ||
+      null,
+
+    registrationVerified:
+      input?.registrationVerified ===
+      true,
+
+    registrationSource:
+      input?.registrationSource ||
+      null,
 
     discoveredAt:
-      input?.discoveredAt || null,
+      input?.discoveredAt ||
+      null,
 
     lastScanned:
       new Date().toISOString(),
 
-    status: "inactive",
+    status:
+      "inactive",
 
-    httpStatus: null,
+    websiteType:
+      "unknown",
 
-    https: true,
+    httpStatus:
+      null,
 
-    finalUrl: null,
+    https:
+      true,
 
-    redirects: [],
+    finalUrl:
+      null,
 
-    websiteName: null,
+    redirects:
+      [],
 
-    title: null,
+    websiteName:
+      null,
 
-    description: null,
+    title:
+      null,
 
-    pagesChecked: [],
+    description:
+      null,
 
-    content: "",
+    pagesChecked:
+      [],
 
-    rawSignals: [],
+    content:
+      "",
 
-    snippets: [],
+    rawSignals:
+      [],
+
+    snippets:
+      [],
 
     investment: {
-      relevant: false,
-      score: 0,
-      keywords: [],
-      dailyReturnClaims: [],
-      roiClaims: []
+      relevant:
+        false,
+
+      score:
+        0,
+
+      keywords:
+        [],
+
+      dailyReturnClaims:
+        [],
+
+      roiClaims:
+        []
     },
 
     paymentMethods: {
-      bank: false,
-      easypaisa: false,
-      jazzcash: false,
-      crypto: false,
-      detected: []
+      bank:
+        false,
+
+      easypaisa:
+        false,
+
+      jazzcash:
+        false,
+
+      crypto:
+        false,
+
+      detected:
+        []
     },
 
     transparency: {
-      company: [],
-      legal: [],
-      support: [],
-      candidate: false
+      company:
+        [],
+
+      legal:
+        [],
+
+      support:
+        [],
+
+      candidate:
+        false
     },
 
     technical: {
-      https: true,
-      status: null,
-      redirects: 0
+      https:
+        true,
+
+      status:
+        null,
+
+      redirects:
+        0
     },
 
-    errors: []
+    errors:
+      []
   };
+
 
   if (!domain) {
     result.errors.push(
@@ -499,8 +687,31 @@ async function scanDomain(input) {
   }
 
 
+  /*
+   * Registration verification is expected
+   * from discover.js.
+   *
+   * Do not allow unverified domains through
+   * if this endpoint is called manually.
+   */
+
+  if (
+    input?.registrationVerified !==
+    true
+  ) {
+    result.errors.push(
+      "Domain registration is not verified"
+    );
+
+    result.websiteType =
+      "registration-unverified";
+
+    return result;
+  }
+
+
   /* ---------------------------------------------
-   * FIRST REQUEST
+   * HOMEPAGE
    * ------------------------------------------- */
 
   let page =
@@ -508,26 +719,30 @@ async function scanDomain(input) {
       `https://${domain}/`
     );
 
-  if (!page.ok && !page.hasContent) {
+
+  if (
+    !page.hasContent
+  ) {
     page =
       await fetchPage(
         `http://${domain}/`
       );
   }
 
-  /*
-   * A 403/401/429 page can still contain useful
-   * title/content/signals.
-   */
-  if (!page.hasContent) {
+
+  if (
+    !page.hasContent
+  ) {
     result.errors =
-      [page.error].filter(Boolean);
+      [page.error]
+        .filter(Boolean);
 
     return result;
   }
 
 
-  result.status = "active";
+  result.status =
+    "active";
 
   result.httpStatus =
     page.status;
@@ -545,23 +760,31 @@ async function scanDomain(input) {
       )
     );
 
+
   result.technical = {
-    https: result.https,
-    status: page.status,
+    https:
+      result.https,
+
+    status:
+      page.status,
+
     redirects:
       result.redirects.length
   };
 
 
   /* ---------------------------------------------
-   * HOMEPAGE DATA
+   * BASIC PAGE DATA
    * ------------------------------------------- */
 
   result.title =
-    extractTitle(page.text);
+    extractTitle(
+      page.text
+    );
 
   result.websiteName =
-    result.title || domain;
+    result.title ||
+    domain;
 
   result.description =
     extractMetaDescription(
@@ -570,14 +793,7 @@ async function scanDomain(input) {
 
 
   /*
-   * Inspect BOTH raw HTML and visible text.
-   *
-   * This catches:
-   * - JS app strings
-   * - payment labels
-   * - hidden navigation URLs
-   * - meta descriptions
-   * - hrefs
+   * Inspect raw HTML + visible text + URLs.
    */
 
   const rawText =
@@ -595,625 +811,649 @@ async function scanDomain(input) {
       page.text
     );
 
-  const combinedInitial =
-    normalizeForSearch(
+  const combined =
+    truncateText(
       [
         rawText,
         visibleText,
-        linksText,
-        result.title || "",
-        result.description || ""
-      ].join(" ")
+        linksText
+      ].join("\n"),
+      MAX_TEXT_CHARS
     );
 
 
   /* ---------------------------------------------
-   * INITIAL DETECTION
+   * PARKED / FOR-SALE GATE
    * ------------------------------------------- */
 
-  result.investment =
-    analyzeInvestmentContent(
-      combinedInitial
-    );
-
-  result.paymentMethods =
-    detectPaymentMethods(
-      combinedInitial
-    );
-
-
-  result.transparency =
-    analyzeTransparency(
-      combinedInitial
+  const parkedAnalysis =
+    detectParkedPage(
+      page,
+      combined,
+      result.finalUrl,
+      result.title
     );
 
 
-  /*
-   * Deep scan when:
-   *
-   * A) investment signal exists
-   * OR
-   * B) payment signal exists
-   * OR
-   * C) homepage has relevant links
-   *
-   * This prevents wasting time on every random
-   * website page.
-   */
+  result.parked =
+    parkedAnalysis;
 
-  const relevantLinks =
-    extractRelevantLinks(
-      page.text,
-      page.finalUrl ||
-        `https://${domain}/`
+
+  if (
+    parkedAnalysis.isParked
+  ) {
+    result.websiteType =
+      "parked-or-for-sale";
+
+    result.status =
+      "inactive";
+
+    result.errors.push(
+      parkedAnalysis.reason
     );
 
-  const shouldDeepScan =
-    result.investment.relevant ||
-    result.paymentMethods.detected.length > 0 ||
-    relevantLinks.length > 0;
-
-
-  if (shouldDeepScan) {
-    const deepUrls =
-      uniqueStrings([
-        ...relevantLinks,
-        ...buildRelevantPathUrls(
-          domain,
-          page.finalUrl
-        )
-      ]).slice(
-        0,
-        MAX_DEEP_PAGES
-      );
-
-    if (deepUrls.length) {
-      const deepPages =
-        await Promise.all(
-          deepUrls.map(
-            url =>
-              fetchPage(url)
-          )
-        );
-
-      const successfulDeepPages =
-        deepPages.filter(
-          item =>
-            item.hasContent
-        );
-
-      const allPages = [
-        page,
-        ...successfulDeepPages
-      ];
-
-      result.pagesChecked =
-        uniqueStrings(
-          allPages.map(
-            item =>
-              item.finalUrl
-          )
-        );
-
-      const deepText =
-        allPages
-          .map(
-            item =>
-              normalizeForSearch(
-                [
-                  item.text,
-                  extractUsefulText(
-                    item.text
-                  ),
-                  extractAllLinksAsText(
-                    item.text
-                  )
-                ].join(" ")
-              )
-          )
-          .filter(Boolean)
-          .join(" ")
-          .slice(
-            0,
-            MAX_TEXT_CHARS
-          );
-
-
-      result.content =
-        deepText;
-
-
-      /*
-       * Re-run detection using ALL pages.
-       */
-      result.investment =
-        analyzeInvestmentContent(
-          deepText
-        );
-
-      result.paymentMethods =
-        detectPaymentMethods(
-          deepText
-        );
-
-      result.transparency =
-        analyzeTransparency(
-          deepText
-        );
-
-      result.snippets =
-        extractRelevantSnippets(
-          deepText
-        );
-
-    } else {
-      result.content =
-        combinedInitial;
-
-      result.snippets =
-        extractRelevantSnippets(
-          combinedInitial
-        );
-    }
-
-  } else {
-    result.content =
-      combinedInitial;
-
-    result.snippets =
-      extractRelevantSnippets(
-        combinedInitial
-      );
+    return result;
   }
 
 
   /*
-   * Candidate requires:
-   *
-   * investment relevance
-   * +
-   * selected payment method
+   * If the homepage is extremely empty,
+   * don't call it a real active site.
    */
+
+  if (
+    isEssentiallyEmptyWebsite(
+      combined,
+      result.title
+    )
+  ) {
+    result.websiteType =
+      "empty-or-placeholder";
+
+    result.status =
+      "inactive";
+
+    result.errors.push(
+      "Website has no meaningful active content"
+    );
+
+    return result;
+  }
+
+
+  result.websiteType =
+    "real-active-website";
+
+
+  /* ---------------------------------------------
+   * INITIAL ANALYSIS
+   * ------------------------------------------- */
+
+  analyzeInvestment(
+    result,
+    combined
+  );
+
+  analyzePayments(
+    result,
+    combined
+  );
+
+  analyzeTransparency(
+    result,
+    combined
+  );
+
+  result.content =
+    truncateText(
+      combined,
+      MAX_TEXT_CHARS
+    );
+
+
+  /* ---------------------------------------------
+   * DEEP SCAN
+   * ------------------------------------------- */
+
+  if (
+    result.investment.relevant ||
+    result.paymentMethods.detected.length
+  ) {
+    const links =
+      extractPageLinks(
+        page.text,
+        result.finalUrl ||
+        `https://${domain}/`
+      );
+
+    const selectedLinks =
+      selectRelevantPages(
+        links
+      ).slice(
+        0,
+        MAX_DEEP_PAGES
+      );
+
+
+    for (
+      const url
+      of selectedLinks
+    ) {
+      if (
+        result.pagesChecked
+          .includes(url)
+      ) {
+        continue;
+      }
+
+      const child =
+        await fetchPage(url);
+
+      if (
+        !child.hasContent
+      ) {
+        continue;
+      }
+
+      const childText =
+        normalizeForSearch(
+          child.text
+        );
+
+      const childVisible =
+        extractUsefulText(
+          child.text
+        );
+
+      const childLinks =
+        extractAllLinksAsText(
+          child.text
+        );
+
+      const childCombined =
+        truncateText(
+          [
+            childText,
+            childVisible,
+            childLinks
+          ].join("\n"),
+          20000
+        );
+
+
+      /*
+       * A deep page saying "buy this domain"
+       * does not mean the homepage is parked,
+       * but if the page is clearly a marketplace
+       * page, don't use it as investment evidence.
+       */
+
+      if (
+        detectParkedPage(
+          child,
+          childCombined,
+          child.finalUrl,
+          extractTitle(child.text)
+        ).isParked
+      ) {
+        continue;
+      }
+
+
+      result.pagesChecked.push(
+        url
+      );
+
+      result.content +=
+        "\n\n--- PAGE: " +
+        url +
+        " ---\n" +
+        childCombined;
+
+
+      analyzeInvestment(
+        result,
+        childCombined
+      );
+
+      analyzePayments(
+        result,
+        childCombined
+      );
+
+      analyzeTransparency(
+        result,
+        childCombined
+      );
+
+
+      const childSnippets =
+        collectSignalSnippets(
+          childCombined
+        );
+
+      result.snippets.push(
+        ...childSnippets
+      );
+    }
+  }
+
+
+  result.content =
+    truncateText(
+      result.content,
+      MAX_TEXT_CHARS
+    );
+
+
+  result.snippets =
+    uniqueStrings(
+      result.snippets
+    ).slice(
+      0,
+      30
+    );
+
+
+  result.rawSignals =
+    uniqueStrings(
+      result.rawSignals
+    );
+
+
+  /*
+   * Recalculate relevance after deep scan.
+   */
+
+  result.investment.relevant =
+    result.investment.score >=
+      10;
+
+
   result.transparency.candidate =
-    result.investment.relevant &&
-    result.paymentMethods.detected.length > 0;
+    result.investment.relevant ||
+    result.paymentMethods.detected.length >
+      0;
 
 
   return result;
 }
 
 
-/* -------------------------------------------------------
- * FETCH PAGE
- * ----------------------------------------------------- */
+/* =========================================================
+ * PARKED PAGE DETECTION
+ * ========================================================= */
 
-async function fetchPage(url) {
-  const controller =
-    new AbortController();
-
-  const timer =
-    setTimeout(
-      () =>
-        controller.abort(),
-      REQUEST_TIMEOUT_MS
-    );
-
-  try {
-    const response =
-      await fetch(
-        url,
-        {
-          method: "GET",
-
-          redirect: "follow",
-
-          signal: controller.signal,
-
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (compatible; LD76-Investment-Radar/1.0)",
-
-            Accept:
-              "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8",
-
-            "Accept-Language":
-              "en-US,en;q=0.8"
-          }
-        }
-      );
-
-
-    const contentType =
-      (
-        response.headers.get(
-          "content-type"
-        ) || ""
-      ).toLowerCase();
-
-
-    const isUsefulType =
-      contentType.includes(
-        "text/html"
-      ) ||
-      contentType.includes(
-        "application/xhtml+xml"
-      ) ||
-      contentType.includes(
-        "text/plain"
-      ) ||
-      contentType.includes(
-        "application/json"
-      );
-
-
-    if (!isUsefulType) {
-      clearTimeout(timer);
-
-      return {
-        ok: false,
-        hasContent: false,
-        status: response.status,
-        finalUrl: response.url,
-        redirects: [],
-        error:
-          `Unsupported content type: ${contentType}`
-      };
-    }
-
-
-    const reader =
-      response.body?.getReader();
-
-
-    if (!reader) {
-      clearTimeout(timer);
-
-      return {
-        ok: false,
-        hasContent: false,
-        status: response.status,
-        finalUrl: response.url,
-        redirects: [],
-        error:
-          "Response body unavailable"
-      };
-    }
-
-
-    const chunks = [];
-
-    let totalBytes = 0;
-
-
-    while (true) {
-      const {
-        done,
-        value
-      } =
-        await reader.read();
-
-
-      if (done) {
-        break;
-      }
-
-
-      if (!value) {
-        continue;
-      }
-
-
-      totalBytes +=
-        value.byteLength;
-
-
-      if (
-        totalBytes >
-        MAX_HTML_BYTES
-      ) {
-        try {
-          await reader.cancel();
-        } catch {}
-
-        break;
-      }
-
-
-      chunks.push(value);
-    }
-
-
-    clearTimeout(timer);
-
-
-    const bytes =
-      combineUint8Arrays(
-        chunks
-      );
-
-
-    const text =
-      new TextDecoder(
-        "utf-8",
-        {
-          fatal: false
-        }
-      ).decode(bytes);
-
-
-    /*
-     * Even non-2xx pages can have useful
-     * content/signals.
-     */
-    const hasContent =
-      text.trim().length > 20;
-
-
-    return {
-      ok:
-        response.ok,
-
-      hasContent,
-
-      status:
-        response.status,
-
-      finalUrl:
-        response.url,
-
-      redirects: [],
-
-      text
-    };
-
-  } catch (error) {
-    clearTimeout(timer);
-
-    return {
-      ok: false,
-
-      hasContent: false,
-
-      error:
-        error?.name ===
-        "AbortError"
-          ? "Request timeout"
-          : (
-              error?.message ||
-              "Request failed"
-            )
-    };
-  }
-}
-
-
-/* -------------------------------------------------------
- * INVESTMENT ANALYSIS
- * ----------------------------------------------------- */
-
-function analyzeInvestmentContent(
-  text
+function detectParkedPage(
+  page,
+  combined,
+  finalUrl,
+  title
 ) {
-  const keywords = [];
+  const text =
+    [
+      combined || "",
+      title || "",
+      finalUrl || ""
+    ].join("\n");
+
+
+  const matches =
+    [];
+
 
   for (
     const pattern
-    of INVESTMENT_PATTERNS
+    of PARKED_PATTERNS
   ) {
     const match =
       text.match(pattern);
 
     if (match) {
-      keywords.push(
+      matches.push(
         match[0]
       );
     }
   }
 
 
-  const dailyReturnClaims =
-    collectMatches(
-      text,
-      DAILY_RETURN_PATTERNS
-    );
-
-
-  const roiClaims =
-    collectMatches(
-      text,
-      ROI_PATTERNS
-    );
-
-
-  let score = 0;
-
-
-  if (keywords.length > 0) {
-    score += 10;
-  }
-
-
-  if (
-    dailyReturnClaims.length > 0
+  for (
+    const pattern
+    of PARKED_URL_PATTERNS
   ) {
-    score += 15;
-  }
-
-
-  if (
-    roiClaims.length > 0
-  ) {
-    score += 15;
-  }
-
-
-  if (
-    /\bdeposit\b/i.test(text)
-  ) {
-    score += 10;
-  }
-
-
-  if (
-    /\bwithdraw(?:al|als)?\b/i.test(
-      text
-    )
-  ) {
-    score += 10;
-  }
-
-
-  if (
-    /\b(?:referral|affiliate|commission)\b/i.test(
-      text
-    )
-  ) {
-    score += 10;
-  }
-
-
-  if (
-    /\b(?:guaranteed|fixed)\s+(?:profit|return|income|earning)\b/i.test(
-      text
-    )
-  ) {
-    score += 15;
+    if (
+      pattern.test(
+        String(finalUrl || "")
+      )
+    ) {
+      matches.push(
+        String(finalUrl)
+      );
+    }
   }
 
 
   /*
-   * Require an actual financial/earning
-   * concept, not just a generic word such as
-   * "return" in navigation.
+   * Strong indicators immediately reject.
    */
-  const strongInvestmentSignal =
-    /\b(?:invest|investment|investing|investor|deposit|profit|profits|roi|return\s+on\s+investment|earning|earnings|passive\s+income|withdraw|withdrawal|investment\s+plan|earning\s+plan|profit\s+plan|trading|forex|staking|yield|crypto\s+investment)\b/i.test(
-      text
+
+  const strong =
+    matches.some(value =>
+      /for sale|buy domain|parked|domain parking|sedo|afternic|dan\.com|domain auction/i
+        .test(value)
     );
 
 
-  const relevant =
-    strongInvestmentSignal;
+  if (strong) {
+    return {
+      isParked:
+        true,
+
+      confidence:
+        "high",
+
+      matches:
+        uniqueStrings(matches),
+
+      reason:
+        "Parked or for-sale domain page detected"
+    };
+  }
+
+
+  /*
+   * "Coming soon" alone is weaker.
+   * Only reject when content is otherwise
+   * essentially empty.
+   */
+
+  if (
+    matches.length &&
+    /coming\s+soon|under\s+construction/i.test(
+      text
+    ) &&
+    isEssentiallyEmptyWebsite(
+      combined,
+      title
+    )
+  ) {
+    return {
+      isParked:
+        true,
+
+      confidence:
+        "medium",
+
+      matches:
+        uniqueStrings(matches),
+
+      reason:
+        "Placeholder/coming-soon website detected"
+    };
+  }
 
 
   return {
-    relevant,
+    isParked:
+      false,
 
-    score,
+    confidence:
+      "none",
 
-    keywords:
-      uniqueStrings(
-        keywords
-      ).slice(
-        0,
-        50
-      ),
-
-    dailyReturnClaims:
-      uniqueStrings(
-        dailyReturnClaims
-      ).slice(
-        0,
-        30
-      ),
-
-    roiClaims:
-      uniqueStrings(
-        roiClaims
-      ).slice(
-        0,
-        30
-      )
+    matches:
+      []
   };
 }
 
 
-/* -------------------------------------------------------
- * PAYMENT DETECTION
- * ----------------------------------------------------- */
+/* =========================================================
+ * EMPTY WEBSITE DETECTION
+ * ========================================================= */
 
-function detectPaymentMethods(
-  text
+function isEssentiallyEmptyWebsite(
+  text,
+  title
 ) {
-  const result = {
-    bank: false,
-    easypaisa: false,
-    jazzcash: false,
-    crypto: false,
-    detected: []
-  };
+  const cleaned =
+    String(text || "")
+      .replace(/\s+/g, " ")
+      .trim();
 
 
-  for (
-    const type of Object.keys(
-      PAYMENT_PATTERNS
-    )
+  if (
+    cleaned.length < 80
   ) {
-    result[type] =
-      PAYMENT_PATTERNS[type].some(
-        pattern =>
-          pattern.test(text)
-      );
-  }
-
-
-  if (result.bank) {
-    result.detected.push(
-      "Bank"
-    );
-  }
-
-
-  if (result.easypaisa) {
-    result.detected.push(
-      "Easypaisa"
-    );
-  }
-
-
-  if (result.jazzcash) {
-    result.detected.push(
-      "JazzCash"
-    );
-  }
-
-
-  if (result.crypto) {
-    result.detected.push(
-      "Crypto"
-    );
-  }
-
-
-  return result;
-}
-
-
-/* -------------------------------------------------------
- * PAYMENT FILTER
- * ----------------------------------------------------- */
-
-function hasSelectedPayment(
-  detected,
-  selected
-) {
-  if (!selected.length) {
     return true;
   }
 
 
-  return selected.some(
-    type =>
-      Boolean(
-        detected?.[type]
-      )
-  );
+  const titleOnly =
+    String(title || "")
+      .trim()
+      .toLowerCase();
+
+
+  if (
+    cleaned.length < 250 &&
+    (
+      titleOnly === "coming soon" ||
+      titleOnly === "under construction" ||
+      titleOnly === "domain for sale" ||
+      titleOnly === "this domain is for sale"
+    )
+  ) {
+    return true;
+  }
+
+
+  return false;
 }
 
 
-/* -------------------------------------------------------
- * PAYMENT NORMALIZATION
- * ----------------------------------------------------- */
+/* =========================================================
+ * INVESTMENT ANALYSIS
+ * ========================================================= */
+
+function analyzeInvestment(
+  result,
+  text
+) {
+  const value =
+    String(text || "");
+
+
+  for (
+    const pattern
+    of INVESTMENT_PATTERNS
+  ) {
+    const match =
+      value.match(pattern);
+
+    if (match) {
+      const keyword =
+        match[0].trim();
+
+      if (
+        !result.investment.keywords
+          .includes(keyword)
+      ) {
+        result.investment.keywords.push(
+          keyword
+        );
+      }
+
+      result.investment.score +=
+        keywordWeight(
+          keyword
+        );
+    }
+  }
+
+
+  for (
+    const pattern
+    of DAILY_RETURN_PATTERNS
+  ) {
+    const matches =
+      value.match(
+        new RegExp(
+          pattern.source,
+          pattern.flags + "g"
+        )
+      );
+
+    if (matches) {
+      result.investment.score +=
+        15;
+
+      result.investment.dailyReturnClaims.push(
+        ...matches
+      );
+    }
+  }
+
+
+  for (
+    const pattern
+    of ROI_PATTERNS
+  ) {
+    const matches =
+      value.match(
+        new RegExp(
+          pattern.source,
+          pattern.flags + "g"
+        )
+      );
+
+    if (matches) {
+      result.investment.score +=
+        15;
+
+      result.investment.roiClaims.push(
+        ...matches
+      );
+    }
+  }
+
+
+  result.investment.keywords =
+    uniqueStrings(
+      result.investment.keywords
+    );
+
+  result.investment.dailyReturnClaims =
+    uniqueStrings(
+      result.investment.dailyReturnClaims
+    );
+
+  result.investment.roiClaims =
+    uniqueStrings(
+      result.investment.roiClaims
+    );
+
+
+  result.investment.score =
+    Math.min(
+      result.investment.score,
+      100
+    );
+
+
+  result.investment.relevant =
+    result.investment.score >=
+      10;
+}
+
+
+function keywordWeight(
+  keyword
+) {
+  const value =
+    String(keyword)
+      .toLowerCase();
+
+  if (
+    /daily|profit|return|roi|investment|deposit|withdraw/i
+      .test(value)
+  ) {
+    return 10;
+  }
+
+  if (
+    /referral|affiliate|commission|bonus|reward/i
+      .test(value)
+  ) {
+    return 5;
+  }
+
+  return 3;
+}
+
+
+/* =========================================================
+ * PAYMENT ANALYSIS
+ * ========================================================= */
+
+function analyzePayments(
+  result,
+  text
+) {
+  const value =
+    String(text || "");
+
+
+  for (
+    const [method, patterns]
+    of Object.entries(
+      PAYMENT_PATTERNS
+    )
+  ) {
+    for (
+      const pattern
+      of patterns
+    ) {
+      if (
+        pattern.test(value)
+      ) {
+        result.paymentMethods[method] =
+          true;
+
+        break;
+      }
+    }
+  }
+
+
+  const detected = [];
+
+
+  for (
+    const method
+    of [
+      "bank",
+      "easypaisa",
+      "jazzcash",
+      "crypto"
+    ]
+  ) {
+    if (
+      result.paymentMethods[method]
+    ) {
+      detected.push(
+        method
+      );
+    }
+  }
+
+
+  result.paymentMethods.detected =
+    detected;
+}
+
+
+/* =========================================================
+ * SELECTED PAYMENT FILTER
+ * ========================================================= */
 
 function normalizePayments(
   value
@@ -1226,393 +1466,352 @@ function normalizePayments(
     ];
   }
 
+  const allowed =
+    new Set([
+      "bank",
+      "easypaisa",
+      "jazzcash",
+      "crypto"
+    ]);
 
   return uniqueStrings(
-    value.map(
-      item =>
+    value
+      .map(item =>
         String(item)
           .trim()
           .toLowerCase()
-    )
-  ).filter(
-    item =>
-      [
-        "bank",
-        "easypaisa",
-        "jazzcash",
-        "crypto"
-      ].includes(item)
+      )
+      .filter(item =>
+        allowed.has(item)
+      )
   );
 }
 
 
-/* -------------------------------------------------------
+function hasSelectedPayment(
+  paymentMethods,
+  selectedPayments
+) {
+  if (
+    !Array.isArray(selectedPayments) ||
+    !selectedPayments.length
+  ) {
+    return false;
+  }
+
+  return selectedPayments.some(
+    method =>
+      paymentMethods?.[method] ===
+      true
+  );
+}
+
+
+/* =========================================================
  * TRANSPARENCY
- * ----------------------------------------------------- */
+ * ========================================================= */
 
 function analyzeTransparency(
+  result,
   text
 ) {
-  const company =
-    findMatches(
-      text,
-      [
-        /\bcompany\b/i,
-        /\bregistered company\b/i,
-        /\bregistration number\b/i,
-        /\bcompany registration\b/i,
-        /\bcorporation\b/i,
-        /\blimited\b/i,
-        /\bllc\b/i,
-        /\bhead office\b/i,
-        /\bphysical address\b/i,
-        /\bmanagement\b/i,
-        /\bmanagement team\b/i,
-        /\bdirector\b/i,
-        /\bteam\b/i,
-        /\blicense\b/i,
-        /\blicensed\b/i,
-        /\bregulator\b/i
-      ]
-    );
+  const value =
+    String(text || "")
+      .toLowerCase();
 
 
-  const legal =
-    findMatches(
-      text,
-      [
-        /\bprivacy policy\b/i,
-        /\bterms and conditions\b/i,
-        /\bterms of service\b/i,
-        /\bterms\b/i,
-        /\brefund policy\b/i,
-        /\brisk disclosure\b/i,
-        /\blegal disclaimer\b/i,
-        /\bcookie policy\b/i,
-        /\bdisclaimer\b/i
-      ]
-    );
-
-
-  const support =
-    findMatches(
-      text,
-      [
-        /\bcontact us\b/i,
-        /\bcontact\b/i,
-        /\bsupport\b/i,
-        /\bsupport email\b/i,
-        /\bhelp desk\b/i,
-        /\blive chat\b/i,
-        /\bticket\b/i,
-        /\btelegram\b/i,
-        /\bwhatsapp\b/i,
-        /\bdiscord\b/i,
-        /\bfaq\b/i,
-        /\bphone\b/i,
-        /\btelephone\b/i,
-        /\bemail\b/i
-      ]
-    );
-
-
-  return {
-    company:
-      uniqueStrings(
-        company
-      ).slice(
-        0,
-        30
-      ),
-
-    legal:
-      uniqueStrings(
-        legal
-      ).slice(
-        0,
-        30
-      ),
-
-    support:
-      uniqueStrings(
-        support
-      ).slice(
-        0,
-        30
-      ),
-
-    candidate: false
-  };
-}
-
-
-/* -------------------------------------------------------
- * RELEVANT LINKS
- * ----------------------------------------------------- */
-
-function extractRelevantLinks(
-  html,
-  baseUrl
-) {
-  const urls = [];
-
-  if (!html) {
-    return urls;
-  }
-
-
-  const hrefRegex =
-    /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
-
-
-  let match;
-
-
-  while (
-    (match =
-      hrefRegex.exec(
-        html
-      )) !== null
+  if (
+    /company|about us|who we are|our team|management|head office|registered office/i
+      .test(value)
   ) {
-    const raw =
-      match[1];
-
-
-    if (!raw) {
-      continue;
-    }
-
-
-    const lower =
-      raw.toLowerCase();
-
-
-    const relevant =
-      RELEVANT_PATHS.some(
-        path =>
-          lower.includes(
-            path
-          )
-      );
-
-
-    if (!relevant) {
-      continue;
-    }
-
-
-    try {
-      const url =
-        new URL(
-          raw,
-          baseUrl
-        );
-
-
-      const base =
-        new URL(
-          baseUrl
-        );
-
-
-      if (
-        url.hostname !==
-        base.hostname
-      ) {
-        continue;
-      }
-
-
-      url.hash = "";
-
-
-      urls.push(
-        url.href
-      );
-
-    } catch {
-      continue;
-    }
+    result.transparency.company.push(
+      "Company/business information detected"
+    );
   }
 
 
-  return uniqueStrings(
-    urls
-  );
+  if (
+    /privacy policy|terms and conditions|terms of service|legal notice|refund policy|risk disclosure/i
+      .test(value)
+  ) {
+    result.transparency.legal.push(
+      "Legal/privacy information detected"
+    );
+  }
+
+
+  if (
+    /contact us|support|customer service|email us|live chat|telegram|whatsapp|discord/i
+      .test(value)
+  ) {
+    result.transparency.support.push(
+      "Support/contact information detected"
+    );
+  }
+
+
+  result.transparency.company =
+    uniqueStrings(
+      result.transparency.company
+    );
+
+  result.transparency.legal =
+    uniqueStrings(
+      result.transparency.legal
+    );
+
+  result.transparency.support =
+    uniqueStrings(
+      result.transparency.support
+    );
 }
 
 
-/* -------------------------------------------------------
- * BUILD RELEVANT URLS
- * ----------------------------------------------------- */
+/* =========================================================
+ * PAGE FETCHER
+ * ========================================================= */
 
-function buildRelevantPathUrls(
-  domain,
-  finalUrl
+async function fetchPage(
+  url
 ) {
-  let origin =
-    `https://${domain}`;
+  const controller =
+    new AbortController();
+
+  const timer =
+    setTimeout(
+      () =>
+        controller.abort(),
+      REQUEST_TIMEOUT_MS
+    );
 
 
   try {
-    if (finalUrl) {
-      origin =
-        new URL(
-          finalUrl
-        ).origin;
-    }
-  } catch {}
+    const response =
+      await fetch(
+        url,
+        {
+          method:
+            "GET",
+
+          redirect:
+            "follow",
+
+          headers: {
+            Accept:
+              "text/html,application/xhtml+xml,text/plain,*/*",
+
+            "User-Agent":
+              "Mozilla/5.0 LD76-Investment-Radar/1.0"
+          },
+
+          signal:
+            controller.signal
+        }
+      );
 
 
-  return RELEVANT_PATHS.map(
-    path =>
-      `${origin}${path}`
+    const buffer =
+      await response.arrayBuffer();
+
+
+    const limited =
+      buffer.byteLength >
+      MAX_HTML_BYTES
+        ? buffer.slice(
+            0,
+            MAX_HTML_BYTES
+          )
+        : buffer;
+
+
+    const text =
+      new TextDecoder(
+        "utf-8",
+        {
+          fatal: false
+        }
+      ).decode(
+        limited
+      );
+
+
+    const hasContent =
+      Boolean(
+        text &&
+        text.trim().length
+      );
+
+
+    return {
+      ok:
+        response.ok,
+
+      status:
+        response.status,
+
+      finalUrl:
+        response.url ||
+        url,
+
+      redirects:
+        [],
+
+      text,
+
+      hasContent,
+
+      error:
+        null
+    };
+
+  } catch (error) {
+    return {
+      ok:
+        false,
+
+      status:
+        null,
+
+      finalUrl:
+        url,
+
+      redirects:
+        [],
+
+      text:
+        "",
+
+      hasContent:
+        false,
+
+      error:
+        error?.message ||
+        "Request failed"
+    };
+
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+/* =========================================================
+ * HTML HELPERS
+ * ========================================================= */
+
+function extractTitle(
+  html
+) {
+  const match =
+    String(html || "")
+      .match(
+        /<title[^>]*>([\s\S]*?)<\/title>/i
+      );
+
+  if (!match) {
+    return null;
+  }
+
+  return cleanHtmlText(
+    match[1]
   );
 }
 
 
-/* -------------------------------------------------------
- * EXTRACT ALL LINKS
- *
- * This is important because payment/investment
- * terms may exist only in href values.
- * ----------------------------------------------------- */
-
-function extractAllLinksAsText(
+function extractMetaDescription(
   html
 ) {
-  if (!html) {
-    return "";
+  const match =
+    String(html || "")
+      .match(
+        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i
+      );
+
+  if (!match) {
+    return null;
   }
 
-
-  const values = [];
-
-
-  const hrefRegex =
-    /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
-
-
-  let match;
-
-
-  while (
-    (match =
-      hrefRegex.exec(
-        html
-      )) !== null
-  ) {
-    values.push(
-      match[1]
-    );
-  }
-
-
-  return values.join(" ");
+  return cleanHtmlText(
+    match[1]
+  );
 }
 
-
-/* -------------------------------------------------------
- * HTML → TEXT
- * ----------------------------------------------------- */
 
 function extractUsefulText(
   html
 ) {
-  if (!html) {
-    return "";
-  }
+  let value =
+    String(html || "");
 
 
-  let text =
-    String(html);
-
-
-  text =
-    text.replace(
+  value =
+    value.replace(
       /<script\b[^>]*>[\s\S]*?<\/script>/gi,
       " "
     );
 
 
-  text =
-    text.replace(
+  value =
+    value.replace(
       /<style\b[^>]*>[\s\S]*?<\/style>/gi,
       " "
     );
 
 
-  text =
-    text.replace(
+  value =
+    value.replace(
       /<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi,
       " "
     );
 
 
-  text =
-    text.replace(
+  value =
+    value.replace(
       /<svg\b[^>]*>[\s\S]*?<\/svg>/gi,
       " "
     );
 
 
-  text =
-    text.replace(
-      /<template\b[^>]*>[\s\S]*?<\/template>/gi,
-      " "
-    );
-
-
-  text =
-    text.replace(
-      /<\/(?:p|div|section|article|li|h1|h2|h3|h4|h5|h6|br|tr|td|th|header|footer|nav)>/gi,
-      " "
-    );
-
-
-  text =
-    text.replace(
+  value =
+    value.replace(
       /<[^>]+>/g,
       " "
     );
 
 
-  text =
-    decodeHtmlEntities(
-      text
-    );
-
-
-  return normalizeForSearch(
-    text
-  ).slice(
-    0,
-    MAX_TEXT_CHARS
+  return cleanHtmlText(
+    value
   );
 }
 
 
-/* -------------------------------------------------------
- * NORMALIZE SEARCH TEXT
- * ----------------------------------------------------- */
-
-function normalizeForSearch(
+function cleanHtmlText(
   value
 ) {
-  return String(
-    value || ""
-  )
+  return String(value || "")
     .replace(
-      /\\u002f/gi,
-      "/"
+      /&nbsp;/gi,
+      " "
     )
     .replace(
-      /\\u003a/gi,
-      ":"
-    )
-    .replace(
-      /\\u0026/gi,
+      /&amp;/gi,
       "&"
+    )
+    .replace(
+      /&quot;/gi,
+      "\""
+    )
+    .replace(
+      /&#39;/gi,
+      "'"
+    )
+    .replace(
+      /&lt;/gi,
+      "<"
+    )
+    .replace(
+      /&gt;/gi,
+      ">"
     )
     .replace(
       /\s+/g,
@@ -1622,228 +1821,269 @@ function normalizeForSearch(
 }
 
 
-/* -------------------------------------------------------
- * TITLE
- * ----------------------------------------------------- */
-
-function extractTitle(
-  html
+function normalizeForSearch(
+  value
 ) {
-  if (!html) {
-    return null;
-  }
-
-
-  const match =
-    html.match(
-      /<title\b[^>]*>([\s\S]*?)<\/title>/i
-    );
-
-
-  if (!match) {
-    return null;
-  }
-
-
-  const title =
-    decodeHtmlEntities(
-      match[1]
-    )
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
-
-
-  return title
-    ? title.slice(
-        0,
-        300
-      )
-    : null;
+  return cleanHtmlText(
+    value
+  ).toLowerCase();
 }
 
 
-/* -------------------------------------------------------
- * META DESCRIPTION
- * ----------------------------------------------------- */
-
-function extractMetaDescription(
-  html
+function truncateText(
+  value,
+  max
 ) {
-  if (!html) {
-    return null;
-  }
+  const text =
+    String(value || "");
 
-
-  const patterns = [
-    /<meta\b[^>]*name\s*=\s*["']description["'][^>]*content\s*=\s*["']([^"']*)["'][^>]*>/i,
-
-    /<meta\b[^>]*content\s*=\s*["']([^"']*)["'][^>]*name\s*=\s*["']description["'][^>]*>/i,
-
-    /<meta\b[^>]*property\s*=\s*["']og:description["'][^>]*content\s*=\s*["']([^"']*)["'][^>]*>/i
-  ];
-
-
-  for (
-    const pattern
-    of patterns
+  if (
+    text.length <= max
   ) {
-    const match =
-      html.match(
-        pattern
-      );
-
-
-    if (match) {
-      const description =
-        decodeHtmlEntities(
-          match[1]
-        )
-          .replace(
-            /\s+/g,
-            " "
-          )
-          .trim();
-
-
-      if (description) {
-        return description.slice(
-          0,
-          700
-        );
-      }
-    }
+    return text;
   }
 
-
-  return null;
-}
-
-
-/* -------------------------------------------------------
- * SNIPPETS
- * ----------------------------------------------------- */
-
-function extractRelevantSnippets(
-  text
-) {
-  const snippets = [];
-
-
-  const patterns = [
-    /\binvest(?:ment|ing)?\b/i,
-    /\bdeposit\b/i,
-    /\bprofit\b/i,
-    /\broi\b/i,
-    /\breturn\b/i,
-    /\bearning\b/i,
-    /\bincome\b/i,
-    /\bwithdraw(?:al)?\b/i,
-    /\beasypaisa\b/i,
-    /\bjazzcash\b/i,
-    /\bpkr\b/i,
-    /\bibAN\b/i,
-    /\bbank\s+transfer\b/i,
-    /\busdt\b/i,
-    /\btrc20\b/i,
-    /\breferral\b/i,
-    /\baffiliate\b/i
-  ];
-
-
-  for (
-    const pattern
-    of patterns
-  ) {
-    const match =
-      pattern.exec(text);
-
-
-    if (!match) {
-      continue;
-    }
-
-
-    const start =
-      Math.max(
-        0,
-        match.index - 220
-      );
-
-
-    const end =
-      Math.min(
-        text.length,
-        match.index + 420
-      );
-
-
-    snippets.push(
-      text
-        .slice(
-          start,
-          end
-        )
-        .trim()
-    );
-  }
-
-
-  return uniqueStrings(
-    snippets
-  ).slice(
+  return text.slice(
     0,
-    25
+    max
   );
 }
 
 
-/* -------------------------------------------------------
- * DOMAIN NORMALIZATION
- * ----------------------------------------------------- */
+/* =========================================================
+ * LINKS
+ * ========================================================= */
 
-function normalizeInputDomain(
-  item
+function extractAllLinksAsText(
+  html
 ) {
-  if (!item) {
-    return null;
+  const links = [];
+
+  const regex =
+    /href\s*=\s*["']([^"']+)["']/gi;
+
+  let match;
+
+  while (
+    (match = regex.exec(
+      String(html || "")
+    ))
+  ) {
+    links.push(
+      match[1]
+    );
   }
 
+  return links.join("\n");
+}
 
-  if (
-    typeof item === "string"
+
+function extractPageLinks(
+  html,
+  baseUrl
+) {
+  const links =
+    [];
+
+  const regex =
+    /href\s*=\s*["']([^"']+)["']/gi;
+
+  let match;
+
+  while (
+    (match = regex.exec(
+      String(html || "")
+    ))
   ) {
-    const domain =
-      normalizeDomain(
-        item
+    const href =
+      match[1];
+
+    if (
+      !href ||
+      href.startsWith("#") ||
+      href.startsWith("mailto:") ||
+      href.startsWith("tel:") ||
+      href.startsWith("javascript:")
+    ) {
+      continue;
+    }
+
+    try {
+      const absolute =
+        new URL(
+          href,
+          baseUrl
+        ).href;
+
+      links.push(
+        absolute
       );
-
-
-    return domain
-      ? { domain }
-      : null;
+    } catch {
+      /* ignore invalid links */
+    }
   }
 
+  return uniqueStrings(
+    links
+  );
+}
 
-  if (
-    typeof item === "object"
+
+function selectRelevantPages(
+  links
+) {
+  const selected =
+    [];
+
+  for (
+    const link
+    of links
   ) {
-    const domain =
-      normalizeDomain(
-        item.domain
-      );
+    let pathname;
 
-
-    if (!domain) {
-      return null;
+    try {
+      pathname =
+        new URL(
+          link
+        ).pathname
+          .toLowerCase()
+          .replace(
+            /\/+$/,
+            ""
+          );
+    } catch {
+      continue;
     }
 
 
+    for (
+      const path
+      of RELEVANT_PATHS
+    ) {
+      if (
+        pathname === path ||
+        pathname.startsWith(
+          path + "/"
+        )
+      ) {
+        selected.push(
+          link
+        );
+
+        break;
+      }
+    }
+  }
+
+  return uniqueStrings(
+    selected
+  );
+}
+
+
+/* =========================================================
+ * SIGNAL SNIPPETS
+ * ========================================================= */
+
+function collectSignalSnippets(
+  text
+) {
+  const snippets =
+    [];
+
+  const lines =
+    String(text || "")
+      .split(/\n+/);
+
+  for (
+    const line
+    of lines
+  ) {
+    const value =
+      line.trim();
+
+    if (
+      !value ||
+      value.length < 8
+    ) {
+      continue;
+    }
+
+    if (
+      /investment|invest|deposit|profit|roi|return|earning|withdraw|easypaisa|jazzcash|bank|usdt|crypto|referral|affiliate/i
+        .test(value)
+    ) {
+      snippets.push(
+        truncateText(
+          value,
+          500
+        )
+      );
+    }
+
+    if (
+      snippets.length >= 20
+    ) {
+      break;
+    }
+  }
+
+  return snippets;
+}
+
+
+/* =========================================================
+ * INPUT HELPERS
+ * ========================================================= */
+
+function normalizeInputDomain(
+  value
+) {
+  if (
+    typeof value ===
+    "string"
+  ) {
     return {
-      ...item,
-      domain
+      domain:
+        normalizeDomain(
+          value
+        ),
+
+      registeredAt:
+        null,
+
+      registrationVerified:
+        false
+    };
+  }
+
+
+  if (
+    value &&
+    typeof value ===
+    "object"
+  ) {
+    return {
+      domain:
+        normalizeDomain(
+          value.domain
+        ),
+
+      registeredAt:
+        value.registeredAt ||
+        null,
+
+      registrationVerified:
+        value.registrationVerified ===
+        true,
+
+      registrationSource:
+        value.registrationSource ||
+        null,
+
+      discoveredAt:
+        value.discoveredAt ||
+        null
     };
   }
 
@@ -1852,23 +2092,83 @@ function normalizeInputDomain(
 }
 
 
-/* -------------------------------------------------------
- * NORMALIZE DOMAIN
- * ----------------------------------------------------- */
+function uniqueDomains(
+  items
+) {
+  const map =
+    new Map();
+
+  for (
+    const item
+    of items
+  ) {
+    if (
+      !item?.domain
+    ) {
+      continue;
+    }
+
+    const existing =
+      map.get(
+        item.domain
+      );
+
+    if (!existing) {
+      map.set(
+        item.domain,
+        item
+      );
+
+      continue;
+    }
+
+    map.set(
+      item.domain,
+      {
+        ...existing,
+        ...item,
+
+        registeredAt:
+          item.registeredAt ||
+          existing.registeredAt,
+
+        registrationVerified:
+          item.registrationVerified ||
+          existing.registrationVerified,
+
+        discoveredAt:
+          item.discoveredAt ||
+          existing.discoveredAt
+      }
+    );
+  }
+
+  return [
+    ...map.values()
+  ];
+}
+
 
 function normalizeDomain(
   value
 ) {
-  if (!value) {
-    return "";
+  if (
+    typeof value !==
+    "string"
+  ) {
+    return null;
   }
 
-
   let domain =
-    String(value)
+    value
       .trim()
       .toLowerCase();
 
+  domain =
+    domain.replace(
+      /^\*\.\s*/,
+      ""
+    );
 
   domain =
     domain.replace(
@@ -1876,298 +2176,50 @@ function normalizeDomain(
       ""
     );
 
-
   domain =
-    domain.replace(
-      /^www\./,
-      ""
-    );
-
-
-  domain =
-    domain.split(
-      "/"
-    )[0];
-
-
-  domain =
-    domain.split(
-      "?"
-    )[0];
-
-
-  domain =
-    domain.split(
-      "#"
-    )[0];
-
-
-  domain =
-    domain.replace(
-      /\.$/,
-      ""
-    );
-
-
-  return domain.trim();
-}
-
-
-/* -------------------------------------------------------
- * UNIQUE DOMAINS
- * ----------------------------------------------------- */
-
-function uniqueDomains(
-  items
-) {
-  const map =
-    new Map();
-
-
-  for (
-    const item
-    of items
-  ) {
-    if (!item) {
-      continue;
-    }
-
-
-    const domain =
-      normalizeDomain(
-        item.domain
+    domain
+      .split("/")[0]
+      .split("?")[0]
+      .replace(
+        /\.$/,
+        ""
       );
 
-
-    if (!domain) {
-      continue;
-    }
-
-
-    if (!map.has(domain)) {
-      map.set(
-        domain,
-        {
-          ...item,
-          domain
-        }
-      );
-    }
-  }
-
-
-  return Array.from(
-    map.values()
-  );
-}
-
-
-/* -------------------------------------------------------
- * MATCH HELPERS
- * ----------------------------------------------------- */
-
-function collectMatches(
-  text,
-  patterns
-) {
-  const matches = [];
-
-
-  for (
-    const pattern
-    of patterns
+  if (
+    !domain ||
+    domain.length > 253 ||
+    /\s|\\/.test(domain)
   ) {
-    const match =
-      text.match(pattern);
-
-
-    if (match) {
-      matches.push(
-        match[0]
-      );
-    }
+    return null;
   }
 
+  const valid =
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
-  return matches;
+  return valid.test(
+    domain
+  )
+    ? domain
+    : null;
 }
 
 
-function findMatches(
-  text,
-  patterns
-) {
-  const matches = [];
-
-
-  for (
-    const pattern
-    of patterns
-  ) {
-    const match =
-      text.match(pattern);
-
-
-    if (match) {
-      matches.push(
-        match[0]
-      );
-    }
-  }
-
-
-  return matches;
-}
-
-
-/* -------------------------------------------------------
- * UNIQUE STRINGS
- * ----------------------------------------------------- */
-
-function uniqueStrings(
-  items
-) {
-  return Array.from(
-    new Set(
-      (items || [])
-        .filter(Boolean)
-        .map(
-          item =>
-            String(item)
-              .trim()
-        )
-        .filter(Boolean)
-    )
-  );
-}
-
-
-/* -------------------------------------------------------
- * HTML ENTITIES
- * ----------------------------------------------------- */
-
-function decodeHtmlEntities(
-  value
-) {
-  if (!value) {
-    return "";
-  }
-
-
-  return String(value)
-
-    .replace(
-      /&nbsp;/gi,
-      " "
-    )
-
-    .replace(
-      /&amp;/gi,
-      "&"
-    )
-
-    .replace(
-      /&quot;/gi,
-      '"'
-    )
-
-    .replace(
-      /&#39;|&apos;/gi,
-      "'"
-    )
-
-    .replace(
-      /&lt;/gi,
-      "<"
-    )
-
-    .replace(
-      /&gt;/gi,
-      ">"
-    )
-
-    .replace(
-      /&#(\d+);/g,
-      (_, code) =>
-        String.fromCharCode(
-          Number(code)
-        )
-    )
-
-    .replace(
-      /&#x([0-9a-f]+);/gi,
-      (_, code) =>
-        String.fromCharCode(
-          parseInt(
-            code,
-            16
-          )
-        )
-    );
-}
-
-
-/* -------------------------------------------------------
- * UINT8 ARRAY
- * ----------------------------------------------------- */
-
-function combineUint8Arrays(
-  arrays
-) {
-  const total =
-    arrays.reduce(
-      (sum, item) =>
-        sum +
-        item.byteLength,
-      0
-    );
-
-
-  const result =
-    new Uint8Array(
-      total
-    );
-
-
-  let offset = 0;
-
-
-  for (
-    const array
-    of arrays
-  ) {
-    result.set(
-      array,
-      offset
-    );
-
-
-    offset +=
-      array.byteLength;
-  }
-
-
-  return result;
-}
-
-
-/* -------------------------------------------------------
+/* =========================================================
  * CONCURRENCY
- * ----------------------------------------------------- */
+ * ========================================================= */
 
 async function runWithConcurrency(
   items,
-  concurrency,
+  limit,
   worker
 ) {
-  let index = 0;
-
+  let index =
+    0;
 
   async function runner() {
     while (true) {
       const current =
         index++;
-
 
       if (
         current >=
@@ -2176,36 +2228,49 @@ async function runWithConcurrency(
         return;
       }
 
-
-      try {
-        await worker(
-          items[current]
-        );
-      } catch (error) {
-        console.error(
-          "Scanner worker error:",
-          error
-        );
-      }
+      await worker(
+        items[current]
+      );
     }
   }
 
-
-  const workerCount =
+  const workers =
     Math.min(
-      concurrency,
+      limit,
       items.length
     );
-
 
   await Promise.all(
     Array.from(
       {
-        length:
-          workerCount
+        length: workers
       },
-      () =>
-        runner()
+      runner
     )
   );
-    }
+}
+
+
+/* =========================================================
+ * UNIQUE STRINGS
+ * ========================================================= */
+
+function uniqueStrings(
+  values
+) {
+  return [
+    ...new Set(
+      (values || [])
+        .filter(
+          value =>
+            value !== null &&
+            value !== undefined &&
+            String(value).trim()
+        )
+        .map(
+          value =>
+            String(value).trim()
+        )
+    )
+  ];
+}
