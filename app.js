@@ -1,1954 +1,1986 @@
 "use strict";
 
 /*
- * LD76 Investment Radar
+ * LD76 INVESTMENT RADAR
+ * Main frontend controller
  *
- * IMPORTANT AI RE-SCAN RULE:
- * A domain is considered "AI analyzed" ONLY when:
- * 1. It was actually sent to /api/analyze
- * 2. Gemini returned a valid result for that domain
- * 3. That result was successfully saved in IndexedDB
+ * IMPORTANT AI RULE:
+ * aiAnalyzed === true is set ONLY after:
+ * 1. Gemini request succeeds
+ * 2. Gemini returns a valid analysis
+ * 3. The analysis is successfully saved in IndexedDB
  *
- * Merely discovering/scanning a domain does NOT mark it as analyzed.
+ * Failed Gemini requests are NOT marked as analyzed.
  */
 
-const APP_CONFIG = {
-  dbName: "LD76InvestmentRadar",
-  dbVersion: 1,
-  storeName: "domains",
-  scanStoreName: "scans"
-};
+
+/* =========================================================
+   APP STATE
+========================================================= */
 
 const state = {
-  period: "24h",
-  isScanning: false,
-  currentView: "home",
-  geminiEnabled: false,
-  results: []
+  domains: [],
+  candidates: [],
+  results: [],
+
+  selectedTld: ".top",
+  selectedPeriod: "24h",
+
+  paymentMethods: [
+    "bank",
+    "easypaisa",
+    "jazzcash"
+  ],
+
+  geminiEnabled: true,
+
+  scanning: false,
+
+  discoveredCount: 0,
+  scannedCount: 0,
+  relevantCount: 0,
+
+  alreadyAnalyzedCount: 0,
+
+  sentToGeminiCount: 0,
+  successfullySavedCount: 0,
+
+  geminiRequests: 0,
+
+  lastError: null
 };
 
-const elements = {
-  tldSelect: document.getElementById("tldSelect"),
-
-  periodButtons: document.querySelectorAll(".period-button"),
-
-  paymentBank: document.getElementById("paymentBank"),
-  paymentEasypaisa: document.getElementById("paymentEasypaisa"),
-  paymentJazzcash: document.getElementById("paymentJazzcash"),
-  paymentCrypto: document.getElementById("paymentCrypto"),
-
-  findSitesButton: document.getElementById("findSitesButton"),
-  settingsButton: document.getElementById("settingsButton"),
-
-  progressSection: document.getElementById("progressSection"),
-  progressStatus: document.getElementById("progressStatus"),
-  progressBarFill: document.getElementById("progressBarFill"),
-  progressDetails: document.getElementById("progressDetails"),
-
-  resultsSection: document.getElementById("resultsSection"),
-  resultsContainer: document.getElementById("resultsContainer"),
-  refreshResultsButton: document.getElementById(
-    "refreshResultsButton"
-  ),
-
-  navButtons: document.querySelectorAll(".nav-button")
-};
 
 /* =========================================================
-   IndexedDB
+   INDEXED DB
 ========================================================= */
 
-let dbPromise = null;
+const DB_NAME = "LD76_Investment_Radar";
 
-function openDatabase() {
-  if (dbPromise) {
-    return dbPromise;
-  }
+const DB_VERSION = 1;
 
-  dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(
-      APP_CONFIG.dbName,
-      APP_CONFIG.dbVersion
-    );
+const STORE_NAME = "domains";
+
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request =
+      indexedDB.open(
+        DB_NAME,
+        DB_VERSION
+      );
 
     request.onupgradeneeded = event => {
-      const db = event.target.result;
+      const db =
+        event.target.result;
 
-      if (!db.objectStoreNames.contains(APP_CONFIG.storeName)) {
-        const domainStore = db.createObjectStore(
-          APP_CONFIG.storeName,
-          {
-            keyPath: "domain"
-          }
-        );
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store =
+          db.createObjectStore(
+            STORE_NAME,
+            {
+              keyPath: "domain"
+            }
+          );
 
-        domainStore.createIndex(
+        store.createIndex(
           "aiAnalyzed",
           "aiAnalyzed",
-          {
-            unique: false
-          }
-        );
-
-        domainStore.createIndex(
-          "lastScanned",
-          "lastScanned",
           {
             unique: false
           }
         );
       }
+    };
 
-      if (
-        !db.objectStoreNames.contains(
-          APP_CONFIG.scanStoreName
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onerror = () => {
+      reject(
+        request.error ||
+        new Error(
+          "IndexedDB open failed"
         )
-      ) {
-        const scanStore = db.createObjectStore(
-          APP_CONFIG.scanStoreName,
-          {
-            keyPath: "id",
-            autoIncrement: true
-          }
+      );
+    };
+  });
+}
+
+
+async function getDomain(
+  domain
+) {
+  const db =
+    await openDB();
+
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          STORE_NAME,
+          "readonly"
         );
 
-        scanStore.createIndex(
-          "createdAt",
-          "createdAt",
-          {
-            unique: false
-          }
+      const store =
+        transaction.objectStore(
+          STORE_NAME
         );
-      }
-    };
 
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
+      const request =
+        store.get(
+          normalizeDomain(domain)
+        );
 
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
+      request.onsuccess = () => {
+        resolve(
+          request.result ||
+          null
+        );
+      };
 
-  return dbPromise;
-}
-
-function normalizeDomain(value) {
-  if (!value) {
-    return "";
-  }
-
-  let domain = String(value)
-    .trim()
-    .toLowerCase();
-
-  domain = domain
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .split("/")[0]
-    .split("?")[0]
-    .split("#")[0]
-    .trim();
-
-  return domain;
-}
-
-async function getDomain(domain) {
-  const normalized = normalizeDomain(domain);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const db = await openDatabase();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(
-      APP_CONFIG.storeName,
-      "readonly"
-    );
-
-    const store = transaction.objectStore(
-      APP_CONFIG.storeName
-    );
-
-    const request = store.get(normalized);
-
-    request.onsuccess = () => {
-      resolve(request.result || null);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-async function saveDomain(domainRecord) {
-  if (!domainRecord?.domain) {
-    return null;
-  }
-
-  const normalizedRecord = {
-    ...domainRecord,
-    domain: normalizeDomain(domainRecord.domain)
-  };
-
-  if (!normalizedRecord.domain) {
-    return null;
-  }
-
-  const db = await openDatabase();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(
-      APP_CONFIG.storeName,
-      "readwrite"
-    );
-
-    const store = transaction.objectStore(
-      APP_CONFIG.storeName
-    );
-
-    const request = store.put(normalizedRecord);
-
-    request.onsuccess = () => {
-      resolve(normalizedRecord);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-async function getAllDomains() {
-  const db = await openDatabase();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(
-      APP_CONFIG.storeName,
-      "readonly"
-    );
-
-    const store = transaction.objectStore(
-      APP_CONFIG.storeName
-    );
-
-    const request = store.getAll();
-
-    request.onsuccess = () => {
-      resolve(request.result || []);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-async function saveScan(scanRecord) {
-  const db = await openDatabase();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(
-      APP_CONFIG.scanStoreName,
-      "readwrite"
-    );
-
-    const store = transaction.objectStore(
-      APP_CONFIG.scanStoreName
-    );
-
-    const request = store.add(scanRecord);
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-/* =========================================================
-   Settings
-========================================================= */
-
-function loadSettings() {
-  try {
-    const saved = localStorage.getItem(
-      "ld76RadarSettings"
-    );
-
-    if (!saved) {
-      return;
+      request.onerror = () => {
+        reject(
+          request.error
+        );
+      };
     }
-
-    const settings = JSON.parse(saved);
-
-    if (settings.tld) {
-      elements.tldSelect.value = settings.tld;
-    }
-
-    if (
-      settings.period === "24h" ||
-      settings.period === "48h"
-    ) {
-      state.period = settings.period;
-    }
-
-    if (typeof settings.bank === "boolean") {
-      elements.paymentBank.checked = settings.bank;
-    }
-
-    if (typeof settings.easypaisa === "boolean") {
-      elements.paymentEasypaisa.checked =
-        settings.easypaisa;
-    }
-
-    if (typeof settings.jazzcash === "boolean") {
-      elements.paymentJazzcash.checked =
-        settings.jazzcash;
-    }
-
-    if (typeof settings.crypto === "boolean") {
-      elements.paymentCrypto.checked =
-        settings.crypto;
-    }
-
-    updatePeriodButtons();
-  } catch (error) {
-    console.warn(
-      "Could not load saved settings.",
-      error
-    );
-  }
-}
-
-function saveSettings() {
-  const settings = {
-    tld: elements.tldSelect.value,
-    period: state.period,
-    bank: elements.paymentBank.checked,
-    easypaisa: elements.paymentEasypaisa.checked,
-    jazzcash: elements.paymentJazzcash.checked,
-    crypto: elements.paymentCrypto.checked
-  };
-
-  localStorage.setItem(
-    "ld76RadarSettings",
-    JSON.stringify(settings)
   );
 }
 
+
+async function saveDomain(
+  record
+) {
+  const db =
+    await openDB();
+
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          STORE_NAME,
+          "readwrite"
+        );
+
+      const store =
+        transaction.objectStore(
+          STORE_NAME
+        );
+
+      const request =
+        store.put(
+          record
+        );
+
+      request.onsuccess = () => {
+        resolve(true);
+      };
+
+      request.onerror = () => {
+        reject(
+          request.error ||
+          new Error(
+            "IndexedDB save failed"
+          )
+        );
+      };
+    }
+  );
+}
+
+
 /* =========================================================
-   UI Helpers
+   UI HELPERS
 ========================================================= */
 
-function updatePeriodButtons() {
-  elements.periodButtons.forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.period === state.period
-    );
-  });
+function $(selector) {
+  return document.querySelector(
+    selector
+  );
 }
+
+
+function setText(
+  selector,
+  value
+) {
+  const element =
+    $(selector);
+
+  if (element) {
+    element.textContent =
+      value == null
+        ? ""
+        : String(value);
+  }
+}
+
+
+function showElement(
+  selector,
+  visible
+) {
+  const element =
+    $(selector);
+
+  if (!element) {
+    return;
+  }
+
+  element.style.display =
+    visible
+      ? ""
+      : "none";
+}
+
+
+function setStatus(
+  message
+) {
+  console.log(
+    "[LD76]",
+    message
+  );
+
+  setText(
+    "#scanStatus",
+    message
+  );
+
+  setText(
+    "#status",
+    message
+  );
+}
+
 
 function setProgress(
-  status,
-  details = "",
-  percentage = 0
+  message
 ) {
-  elements.progressSection.classList.remove("hidden");
-
-  elements.progressStatus.textContent = status;
-  elements.progressDetails.textContent = details;
-
-  const safePercentage = Math.max(
-    0,
-    Math.min(100, Number(percentage) || 0)
+  setText(
+    "#scanProgress",
+    message
   );
 
-  elements.progressBarFill.style.width =
-    `${safePercentage}%`;
+  setText(
+    "#progress",
+    message
+  );
 }
 
-function setScanning(scanning) {
-  state.isScanning = scanning;
-
-  elements.findSitesButton.disabled = scanning;
-
-  elements.findSitesButton.textContent =
-    scanning
-      ? "SCANNING..."
-      : "FIND NEW SITES";
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function normalizeArray(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(Boolean);
-}
-
-function formatDate(value) {
-  if (!value) {
-    return "Unknown";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
-
-  return date.toLocaleString();
-}
 
 /* =========================================================
-   Scan Configuration
+   DISCOVERY
 ========================================================= */
 
-function getSelectedPayments() {
-  const payments = [];
+async function discoverDomains() {
+  const response =
+    await fetch(
+      "/api/discover",
+      {
+        method: "POST",
 
-  if (elements.paymentBank.checked) {
-    payments.push("bank");
-  }
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
 
-  if (elements.paymentEasypaisa.checked) {
-    payments.push("easypaisa");
-  }
+        body:
+          JSON.stringify({
+            tld:
+              state.selectedTld,
 
-  if (elements.paymentJazzcash.checked) {
-    payments.push("jazzcash");
-  }
-
-  if (elements.paymentCrypto.checked) {
-    payments.push("crypto");
-  }
-
-  return payments;
-}
-
-function getScanConfig() {
-  return {
-    tlds: [
-      elements.tldSelect.value
-    ],
-    period: state.period,
-    paymentMethods:
-      getSelectedPayments()
-  };
-}
-
-/* =========================================================
-   API
-========================================================= */
-
-async function postJson(url, payload) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+            period:
+              state.selectedPeriod
+          })
+      }
+    );
 
   let data = null;
 
   try {
-    data = await response.json();
+    data =
+      await response.json();
   } catch {
-    data = null;
+    throw new Error(
+      `Discovery returned invalid JSON (${response.status})`
+    );
   }
 
-  if (!response.ok) {
-    const message =
+  if (!response.ok || !data?.ok) {
+    throw new Error(
       data?.error ||
-      `Request failed with HTTP ${response.status}`;
-
-    throw new Error(message);
+      data?.message ||
+      `Discovery failed (${response.status})`
+    );
   }
 
   return data;
 }
 
-/* =========================================================
-   Discovery
-========================================================= */
-
-async function discoverDomains(config) {
-  setProgress(
-    "Discovering recent domains...",
-    `Searching ${config.tlds.join(", ")} during ${config.period}.`,
-    10
-  );
-
-  return postJson(
-    "/api/discover",
-    {
-      tlds: config.tlds,
-      period: config.period
-    }
-  );
-}
 
 /* =========================================================
-   Website Scan
+   SCANNER
 ========================================================= */
 
-async function scanSites(
-  config,
+async function scanDomains(
   domains
 ) {
-  setProgress(
-    "Checking active websites...",
-    `${domains.length} discovered domains received.`,
-    30
-  );
+  if (!domains.length) {
+    return {
+      candidates: []
+    };
+  }
 
-  return postJson(
-    "/api/scan",
-    {
-      domains,
-      paymentMethods:
-        config.paymentMethods
-    }
-  );
+  const response =
+    await fetch(
+      "/api/scan",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body:
+          JSON.stringify({
+            domains,
+
+            paymentMethods:
+              state.paymentMethods
+          })
+      }
+    );
+
+
+  let data = null;
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      `Scanner returned invalid JSON (${response.status})`
+    );
+  }
+
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(
+      data?.error ||
+      data?.message ||
+      `Scanner failed (${response.status})`
+    );
+  }
+
+
+  state.scannedCount =
+    Number(
+      data.scanned || 0
+    );
+
+  state.relevantCount =
+    Number(
+      data.paymentMatches ||
+      data.investmentMatches ||
+      0
+    );
+
+
+  return data;
 }
 
+
 /* =========================================================
-   AI ANALYSIS HISTORY
+   ANALYZED FILTER
 ========================================================= */
 
 /*
  * IMPORTANT:
  *
- * We DO NOT consider a domain analyzed because:
- * - it exists in IndexedDB
- * - it was discovered before
- * - it was scanned before
- * - it became an investment candidate before
+ * Only a record with:
  *
- * ONLY this exact condition excludes it:
+ * aiAnalyzed === true
  *
- * saved.aiAnalyzed === true
+ * AND
  *
- * That flag is written ONLY after a successful Gemini result.
+ * a valid saved aiScore
+ *
+ * is considered previously analyzed.
+ *
+ * Discovery / scanner / candidate status alone
+ * NEVER prevents another Gemini request.
  */
 
 async function filterAlreadyAnalyzed(
-  domains
+  candidates
 ) {
   const fresh = [];
+
   let alreadyAnalyzed = 0;
 
-  for (const item of domains) {
-    const rawDomain =
-      typeof item === "string"
-        ? item
-        : item?.domain;
 
+  for (
+    const candidate
+    of candidates
+  ) {
     const domain =
-      normalizeDomain(rawDomain);
+      normalizeDomain(
+        candidate?.domain
+      );
 
     if (!domain) {
       continue;
     }
 
-    const saved =
-      await getDomain(domain);
 
-    if (
-      saved &&
-      saved.aiAnalyzed === true &&
-      saved.aiScore !== null &&
-      saved.aiScore !== undefined
-    ) {
+    const existing =
+      await getDomain(
+        domain
+      );
+
+
+    const validSavedAnalysis =
+      Boolean(
+        existing &&
+        existing.aiAnalyzed === true &&
+        Number.isFinite(
+          Number(
+            existing.aiScore
+          )
+        ) &&
+        Number(
+          existing.aiScore
+        ) >= 0 &&
+        Number(
+          existing.aiScore
+        ) <= 100
+      );
+
+
+    if (validSavedAnalysis) {
       alreadyAnalyzed++;
       continue;
     }
 
+
+    /*
+     * Merge existing scanner history
+     * without treating it as AI analysis.
+     */
     fresh.push({
-      ...(typeof item === "object"
-        ? item
-        : {}),
+      ...(existing || {}),
+      ...candidate,
+
       domain
     });
   }
 
-  return {
-    fresh,
-    alreadyAnalyzed
-  };
+
+  state.alreadyAnalyzedCount =
+    alreadyAnalyzed;
+
+
+  return fresh;
 }
 
+
 /* =========================================================
-   Gemini Analysis
+   GEMINI ANALYSIS
 ========================================================= */
 
 async function analyzeWithGemini(
   candidates
 ) {
-  if (!candidates.length) {
+  if (!state.geminiEnabled) {
     return {
-      results: [],
-      requestsMade: 0
+      skipped: true,
+      results: []
     };
   }
 
-  setProgress(
-    "Preparing Gemini analysis...",
-    `${candidates.length} new sites are ready for AI analysis.`,
-    80
-  );
 
-  try {
-    setProgress(
-      "AI analysis...",
-      `Sending ${candidates.length} final candidates to Gemini.`,
-      88
+  if (!Array.isArray(candidates)) {
+    return {
+      skipped: false,
+      results: []
+    };
+  }
+
+
+  if (!candidates.length) {
+    return {
+      skipped: false,
+      results: []
+    };
+  }
+
+
+  /*
+   * IMPORTANT:
+   * One request for ALL candidates.
+   *
+   * There is NO 4/5 candidate limit here.
+   */
+
+  const payloadCandidates =
+    candidates.map(
+      candidate =>
+        compactCandidate(
+          candidate
+        )
     );
 
-    const response =
-      await postJson(
+
+  setProgress(
+    `Sending ${payloadCandidates.length} candidate(s) to Gemini...`
+  );
+
+
+  let response;
+
+
+  try {
+    response =
+      await fetch(
         "/api/analyze",
         {
-          candidates
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              candidates:
+                payloadCandidates
+            })
         }
       );
 
-    const results =
-      normalizeArray(
-        response?.results
-      );
-
-    return {
-      results,
-      requestsMade:
-        Number(
-          response?.requestsMade
-        ) || (results.length ? 1 : 0)
-    };
   } catch (error) {
-    console.warn(
-      "Gemini analysis unavailable.",
-      error
+    throw new Error(
+      `Gemini connection failed: ${
+        error?.message ||
+        "Network error"
+      }`
+    );
+  }
+
+
+  /*
+   * THIS is the actual Gemini request.
+   *
+   * Count it only after fetch was actually
+   * called and a response was received.
+   */
+
+  state.geminiRequests++;
+
+
+  let data = null;
+
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      `Gemini API returned invalid JSON (${response.status})`
+    );
+  }
+
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error ||
+      data?.message ||
+      `Gemini API failed (${response.status})`
+    );
+  }
+
+
+  if (!data?.ok) {
+    throw new Error(
+      data?.error ||
+      data?.message ||
+      "Gemini API returned ok=false"
+    );
+  }
+
+
+  const results =
+    normalizeGeminiResults(
+      data
     );
 
-    return {
-      results: [],
-      requestsMade: 0,
-      error:
-        error.message ||
-        "Gemini analysis unavailable."
-    };
+
+  if (!results.length) {
+    throw new Error(
+      "Gemini returned no valid analysis results"
+    );
   }
+
+
+  return {
+    skipped: false,
+
+    results,
+
+    returnedCount:
+      results.length
+  };
 }
 
+
 /* =========================================================
-   Save ONLY Successfully Analyzed Gemini Results
+   COMPACT GEMINI CANDIDATE
 ========================================================= */
 
-async function saveAnalysisResults(
-  results
+function compactCandidate(
+  candidate
 ) {
-  let savedCount = 0;
+  return {
+    domain:
+      normalizeDomain(
+        candidate?.domain
+      ),
 
-  for (const result of results) {
-    if (!result?.domain) {
+    websiteName:
+      candidate?.websiteName ||
+      candidate?.title ||
+      null,
+
+    title:
+      candidate?.title ||
+      null,
+
+    description:
+      candidate?.description ||
+      null,
+
+    registeredAt:
+      candidate?.registeredAt ||
+      null,
+
+    discoveredAt:
+      candidate?.discoveredAt ||
+      null,
+
+    status:
+      candidate?.status ||
+      null,
+
+    httpStatus:
+      candidate?.httpStatus ||
+      null,
+
+    finalUrl:
+      candidate?.finalUrl ||
+      null,
+
+    https:
+      Boolean(
+        candidate?.https
+      ),
+
+    pagesChecked:
+      Array.isArray(
+        candidate?.pagesChecked
+      )
+        ? candidate.pagesChecked
+        : [],
+
+    investment:
+      candidate?.investment || {
+        relevant: false,
+        score: 0,
+        keywords: [],
+        dailyReturnClaims: [],
+        roiClaims: []
+      },
+
+    paymentMethods:
+      candidate?.paymentMethods || {
+        bank: false,
+        easypaisa: false,
+        jazzcash: false,
+        crypto: false,
+        detected: []
+      },
+
+    transparency:
+      candidate?.transparency || {
+        company: [],
+        legal: [],
+        support: []
+      },
+
+    snippets:
+      Array.isArray(
+        candidate?.snippets
+      )
+        ? candidate.snippets
+        : [],
+
+    /*
+     * Limit raw content sent to Gemini.
+     */
+    content:
+      String(
+        candidate?.content ||
+        ""
+      ).slice(
+        0,
+        30000
+      )
+  };
+}
+
+
+/* =========================================================
+   GEMINI RESULT NORMALIZATION
+========================================================= */
+
+function normalizeGeminiResults(
+  data
+) {
+  let rawResults =
+    data?.results;
+
+
+  if (
+    !Array.isArray(
+      rawResults
+    )
+  ) {
+    /*
+     * Support alternate API response
+     * property names.
+     */
+    rawResults =
+      data?.analyses ||
+      data?.analysis ||
+      data?.candidates ||
+      [];
+  }
+
+
+  if (!Array.isArray(rawResults)) {
+    return [];
+  }
+
+
+  const results = [];
+
+
+  for (
+    const item
+    of rawResults
+  ) {
+    if (!item) {
       continue;
     }
 
+
     const domain =
       normalizeDomain(
-        result.domain
+        item.domain ||
+        item.website ||
+        item.url
       );
+
 
     if (!domain) {
       continue;
     }
 
-    /*
-     * A valid AI result must have a real scamScore.
-     * If Gemini returns an incomplete object,
-     * DO NOT mark the domain as analyzed.
-     */
-    const numericScore =
-      Number(result.scamScore);
+
+    const score =
+      Number(
+        item.aiScore ??
+        item.score ??
+        item.scamScore ??
+        item.geminiScamScore
+      );
+
 
     if (
-      !Number.isFinite(numericScore) ||
-      numericScore < 0 ||
-      numericScore > 100
+      !Number.isFinite(
+        score
+      )
+    ) {
+      continue;
+    }
+
+
+    if (
+      score < 0 ||
+      score > 100
+    ) {
+      continue;
+    }
+
+
+    results.push({
+      domain,
+
+      aiScore:
+        Math.round(
+          score
+        ),
+
+      confidence:
+        normalizeConfidence(
+          item.confidence
+        ),
+
+      analysis:
+        item.analysis ||
+        item.summary ||
+        item.reasoning ||
+        "",
+
+      redFlags:
+        normalizeStringArray(
+          item.redFlags ||
+          item.red_flags
+        ),
+
+      evidence:
+        normalizeStringArray(
+          item.evidence
+        ),
+
+      recommendation:
+        item.recommendation ||
+        "",
+
+      band:
+        scamBand(
+          score
+        )
+    });
+  }
+
+
+  return results;
+}
+
+
+/* =========================================================
+   SAVE GEMINI RESULTS
+========================================================= */
+
+async function saveAnalysisResults(
+  candidates,
+  geminiResults
+) {
+  if (
+    !Array.isArray(
+      geminiResults
+    )
+  ) {
+    return 0;
+  }
+
+
+  /*
+   * Only domains that were actually sent
+   * in THIS Gemini request are accepted.
+   */
+
+  const submittedDomains =
+    new Set(
+      candidates
+        .map(
+          candidate =>
+            normalizeDomain(
+              candidate?.domain
+            )
+        )
+        .filter(Boolean)
+    );
+
+
+  let savedCount = 0;
+
+
+  for (
+    const analysis
+    of geminiResults
+  ) {
+    const domain =
+      normalizeDomain(
+        analysis?.domain
+      );
+
+
+    if (!domain) {
+      continue;
+    }
+
+
+    if (
+      !submittedDomains.has(
+        domain
+      )
     ) {
       console.warn(
-        "Skipping invalid Gemini result:",
+        "Ignoring Gemini result for domain not submitted:",
         domain
       );
 
       continue;
     }
 
-    const existing =
-      await getDomain(domain);
 
-    const now =
-      new Date().toISOString();
+    const score =
+      Number(
+        analysis?.aiScore
+      );
+
+
+    if (
+      !Number.isFinite(
+        score
+      ) ||
+      score < 0 ||
+      score > 100
+    ) {
+      continue;
+    }
+
+
+    /*
+     * Get current record again.
+     */
+    const existing =
+      await getDomain(
+        domain
+      );
+
+
+    const candidate =
+      candidates.find(
+        item =>
+          normalizeDomain(
+            item?.domain
+          ) === domain
+      );
+
 
     const record = {
       ...(existing || {}),
+      ...(candidate || {}),
 
       domain,
 
-      firstSeen:
-        existing?.firstSeen ||
-        result.firstSeen ||
-        now,
+      aiScore:
+        Math.round(
+          score
+        ),
 
-      lastSeen:
-        result.lastSeen ||
-        existing?.lastSeen ||
-        now,
+      geminiScamScore:
+        Math.round(
+          score
+        ),
 
-      registeredAt:
-        result.registeredAt ||
-        existing?.registeredAt ||
+      confidence:
+        analysis.confidence ||
         null,
 
-      discoveredAt:
-        result.discoveredAt ||
-        existing?.discoveredAt ||
-        now,
+      aiAnalysis:
+        analysis.analysis ||
+        "",
 
-      lastScanned: now,
+      aiRedFlags:
+        analysis.redFlags ||
+        [],
 
-      keywordScore:
-        Number(
-          result.keywordScore
-        ) || 0,
+      aiEvidence:
+        analysis.evidence ||
+        [],
 
-      paymentScore:
-        Number(
-          result.paymentScore
-        ) || 0,
+      aiRecommendation:
+        analysis.recommendation ||
+        "",
+
+      aiBand:
+        analysis.band ||
+        scamBand(score),
+
+      aiAnalyzedAt:
+        new Date().toISOString(),
 
       /*
-       * THIS is the important flag.
-       *
-       * It becomes true only here,
-       * after a valid Gemini result exists.
+       * DO NOT set this before save.
        */
-      aiAnalyzed: true,
-
-      aiScore:
-        numericScore,
-
-      aiAnalysis:
-        result,
-
-      websiteName:
-        result.websiteName ||
-        existing?.websiteName ||
-        domain,
-
-      status:
-        result.status ||
-        existing?.status ||
-        "active"
+      aiAnalyzed: false
     };
 
+
+    /*
+     * First save the result.
+     */
     try {
-      await saveDomain(record);
-      savedCount++;
+      await saveDomain(
+        record
+      );
     } catch (error) {
-      /*
-       * If IndexedDB save fails, the domain is NOT
-       * considered successfully analyzed for future scans.
-       */
       console.error(
-        `Could not save Gemini result for ${domain}`,
+        "Failed saving Gemini result:",
+        domain,
         error
+      );
+
+      /*
+       * aiAnalyzed remains false.
+       */
+      continue;
+    }
+
+
+    /*
+     * Verify the record actually exists
+     * with the AI score.
+     */
+    let verified = null;
+
+
+    try {
+      verified =
+        await getDomain(
+          domain
+        );
+    } catch {
+      verified = null;
+    }
+
+
+    const saveSucceeded =
+      Boolean(
+        verified &&
+        Number(
+          verified.aiScore
+        ) ===
+          Math.round(score)
+      );
+
+
+    if (!saveSucceeded) {
+      console.error(
+        "Gemini result could not be verified after save:",
+        domain
+      );
+
+      continue;
+    }
+
+
+    /*
+     * ONLY NOW mark as analyzed.
+     */
+    const finalRecord = {
+      ...verified,
+
+      aiAnalyzed:
+        true
+    };
+
+
+    try {
+      await saveDomain(
+        finalRecord
+      );
+    } catch (error) {
+      console.error(
+        "Failed setting aiAnalyzed=true:",
+        domain,
+        error
+      );
+
+      continue;
+    }
+
+
+    /*
+     * Final verification.
+     */
+    let finalVerified = null;
+
+
+    try {
+      finalVerified =
+        await getDomain(
+          domain
+        );
+    } catch {
+      finalVerified = null;
+    }
+
+
+    if (
+      finalVerified?.aiAnalyzed ===
+        true &&
+      Number.isFinite(
+        Number(
+          finalVerified.aiScore
+        )
+      )
+    ) {
+      savedCount++;
+
+      state.successfullySavedCount++;
+
+      state.results.push(
+        finalVerified
       );
     }
   }
 
+
   return savedCount;
 }
 
-/* =========================================================
-   Result Rendering
-========================================================= */
-
-function getScoreClass(score) {
-  const numericScore =
-    Number(score) || 0;
-
-  if (numericScore >= 81) {
-    return "status-danger";
-  }
-
-  if (numericScore >= 61) {
-    return "status-warning";
-  }
-
-  return "status-success";
-}
-
-function getClassification(score) {
-  const numericScore =
-    Number(score) || 0;
-
-  if (numericScore <= 20) {
-    return "Very Low Scam Indicators";
-  }
-
-  if (numericScore <= 40) {
-    return "Low";
-  }
-
-  if (numericScore <= 60) {
-    return "Moderate / Uncertain";
-  }
-
-  if (numericScore <= 80) {
-    return "Suspicious";
-  }
-
-  return "Highly Suspicious";
-}
-
-function renderList(
-  items,
-  emptyText
-) {
-  const normalized =
-    normalizeArray(items);
-
-  if (!normalized.length) {
-    return `<li>${escapeHtml(emptyText)}</li>`;
-  }
-
-  return normalized
-    .map(
-      item =>
-        `<li>${escapeHtml(item)}</li>`
-    )
-    .join("");
-}
-
-function renderPaymentMethods(
-  methods
-) {
-  const normalized =
-    normalizeArray(methods);
-
-  if (!normalized.length) {
-    return `
-      <div class="evidence-item">
-        <span class="evidence-icon">❓</span>
-        <span>No payment method verified.</span>
-      </div>
-    `;
-  }
-
-  return normalized
-    .map(
-      method => `
-        <div class="evidence-item">
-          <span class="evidence-icon">✓</span>
-          <span>${escapeHtml(method)}</span>
-        </div>
-      `
-    )
-    .join("");
-}
-
-function renderResultCard(
-  result
-) {
-  const score =
-    Number(result.scamScore) || 0;
-
-  const classification =
-    result.classification ||
-    getClassification(score);
-
-  const scoreClass =
-    getScoreClass(score);
-
-  const company =
-    result.company ||
-    result.companyRegistration ||
-    {};
-
-  const legal =
-    result.legal ||
-    result.privacy ||
-    {};
-
-  const support =
-    result.support ||
-    {};
-
-  const payments =
-    result.paymentMethods ||
-    [];
-
-  const claims =
-    result.investmentClaims ||
-    [];
-
-  return `
-    <article
-      class="result-card"
-      data-domain="${escapeHtml(result.domain)}"
-    >
-
-      <div class="result-card-header">
-
-        <div>
-          <h3 class="website-name">
-            ${escapeHtml(
-              result.websiteName ||
-              result.domain
-            )}
-          </h3>
-
-          <div class="domain-name">
-            ${escapeHtml(
-              result.domain
-            )}
-          </div>
-        </div>
-
-        <div class="scam-score">
-
-          <div class="scam-score-label">
-            GEMINI SCAM SCORE
-          </div>
-
-          <div class="scam-score-value ${scoreClass}">
-            ${score}
-          </div>
-
-          <div class="scam-classification">
-            ${escapeHtml(
-              classification
-            )}
-          </div>
-
-        </div>
-
-      </div>
-
-      <div class="evidence-grid">
-
-        <div class="evidence-item">
-
-          <span class="evidence-icon">
-            ${
-              company.verified
-                ? "✓"
-                : "❌"
-            }
-          </span>
-
-          <span>
-            <strong>
-              Company Registration:
-            </strong>
-
-            ${escapeHtml(
-              company.summary ||
-              (
-                company.verified
-                  ? "Verified"
-                  : "Not verified"
-              )
-            )}
-          </span>
-
-        </div>
-
-        <div class="evidence-item">
-
-          <span class="evidence-icon">
-            ${
-              legal.verified
-                ? "✓"
-                : "❌"
-            }
-          </span>
-
-          <span>
-            <strong>
-              Privacy / Legal:
-            </strong>
-
-            ${escapeHtml(
-              legal.summary ||
-              (
-                legal.verified
-                  ? "Meaningful legal information found"
-                  : "Missing or not verified"
-              )
-            )}
-          </span>
-
-        </div>
-
-        <div class="evidence-item">
-
-          <span class="evidence-icon">
-            ${
-              support.verified
-                ? "✓"
-                : "❌"
-            }
-          </span>
-
-          <span>
-            <strong>
-              Support:
-            </strong>
-
-            ${escapeHtml(
-              support.summary ||
-              (
-                support.verified
-                  ? "Support information found"
-                  : "No meaningful support found"
-              )
-            )}
-          </span>
-
-        </div>
-
-      </div>
-
-      ${
-        payments.length
-          ? `
-            <div class="card-section">
-
-              <div class="card-section-title">
-                Payment Methods
-              </div>
-
-              <div class="evidence-grid">
-                ${renderPaymentMethods(
-                  payments
-                )}
-              </div>
-
-            </div>
-          `
-          : ""
-      }
-
-      ${
-        claims.length
-          ? `
-            <div class="card-section">
-
-              <div class="card-section-title">
-                Investment / Earning Claims
-              </div>
-
-              <ul>
-                ${renderList(
-                  claims,
-                  "No specific claim extracted."
-                )}
-              </ul>
-
-            </div>
-          `
-          : ""
-      }
-
-      ${
-        result.summary
-          ? `
-            <div class="card-section">
-
-              <div class="card-section-title">
-                Why
-              </div>
-
-              <div class="evidence-item">
-                ${escapeHtml(
-                  result.summary
-                )}
-              </div>
-
-            </div>
-          `
-          : ""
-      }
-
-      ${
-        result.redFlags?.length
-          ? `
-            <div class="card-section">
-
-              <div class="card-section-title">
-                Red Flags
-              </div>
-
-              <ul>
-                ${renderList(
-                  result.redFlags,
-                  "No red flags reported."
-                )}
-              </ul>
-
-            </div>
-          `
-          : ""
-      }
-
-      ${
-        result.positiveSignals?.length
-          ? `
-            <div class="card-section">
-
-              <div class="card-section-title">
-                Positive Signals
-              </div>
-
-              <ul>
-                ${renderList(
-                  result.positiveSignals,
-                  "No positive signals reported."
-                )}
-              </ul>
-
-            </div>
-          `
-          : ""
-      }
-
-      <div class="card-actions">
-
-        ${
-          result.url
-            ? `
-              <button
-                type="button"
-                class="card-action primary"
-                data-open-url="${escapeHtml(
-                  result.url
-                )}"
-              >
-                OPEN WEBSITE
-              </button>
-            `
-            : ""
-        }
-
-        <button
-          type="button"
-          class="card-action"
-          data-details-domain="${escapeHtml(
-            result.domain
-          )}"
-        >
-          DETAILS
-        </button>
-
-      </div>
-
-    </article>
-  `;
-}
-
-function renderResults(
-  results
-) {
-  state.results =
-    normalizeArray(results);
-
-  if (!state.results.length) {
-    elements.resultsContainer.innerHTML = `
-      <div class="empty-state">
-
-        <div class="empty-icon">
-          🔎
-        </div>
-
-        <h3>
-          No new candidates
-        </h3>
-
-        <p>
-          No new sites were available
-          for Gemini analysis.
-        </p>
-
-      </div>
-    `;
-
-    return;
-  }
-
-  elements.resultsContainer.innerHTML =
-    state.results
-      .map(renderResultCard)
-      .join("");
-}
 
 /* =========================================================
    MAIN SCAN
 ========================================================= */
 
 async function startScan() {
-  if (state.isScanning) {
+  if (state.scanning) {
     return;
   }
 
-  saveSettings();
 
-  const config =
-    getScanConfig();
+  state.scanning = true;
 
-  if (!config.tlds.length) {
-    alert(
-      "Please select at least one TLD."
-    );
+  state.lastError = null;
 
-    return;
-  }
+  state.discoveredCount = 0;
+  state.scannedCount = 0;
+  state.relevantCount = 0;
+  state.alreadyAnalyzedCount = 0;
+  state.sentToGeminiCount = 0;
+  state.successfullySavedCount = 0;
+  state.geminiRequests = 0;
 
-  if (
-    !config.paymentMethods.length
-  ) {
-    alert(
-      "Please select at least one payment method."
-    );
+  state.candidates = [];
+  state.results = [];
 
-    return;
-  }
-
-  setScanning(true);
 
   try {
-
-    /* -----------------------------------------------------
-       STEP 1 — DISCOVERY
-    ----------------------------------------------------- */
-
-    setProgress(
-      "Starting scan...",
-      "Preparing discovery request.",
-      5
+    setStatus(
+      "Discovering domains..."
     );
 
-    const discoveryResponse =
-      await discoverDomains(
-        config
+
+    setProgress(
+      "Starting discovery..."
+    );
+
+
+    /*
+     * STEP 1
+     */
+    const discovery =
+      await discoverDomains();
+
+
+    state.domains =
+      Array.isArray(
+        discovery.domains
+      )
+        ? discovery.domains
+        : Array.isArray(
+            discovery.results
+          )
+          ? discovery.results
+          : [];
+
+
+    state.discoveredCount =
+      Number(
+        discovery.count ??
+        state.domains.length
       );
 
-    const discovered =
-      normalizeArray(
-        discoveryResponse?.domains
+
+    setProgress(
+      `Discovered ${state.discoveredCount} domains.`
+    );
+
+
+    if (!state.domains.length) {
+      setStatus(
+        "No domains discovered."
       );
 
-    if (!discovered.length) {
-
-      setProgress(
-        "Complete",
-        "No domains were discovered in the selected period.",
-        100
-      );
-
-      renderResults([]);
+      renderResults();
 
       return;
     }
 
-    /* -----------------------------------------------------
-       STEP 2 — WEBSITE SCAN
-    ----------------------------------------------------- */
 
-    const scanResponse =
-      await scanSites(
-        config,
-        discovered
-      );
-
-    const scannedCandidates =
-      normalizeArray(
-        scanResponse?.candidates ||
-        scanResponse?.results
-      );
-
-    setProgress(
-      "Filtering investment sites...",
-      `${scannedCandidates.length} relevant candidates found.`,
-      55
+    /*
+     * STEP 2
+     */
+    setStatus(
+      `Scanning ${state.domains.length} domains...`
     );
 
-    if (!scannedCandidates.length) {
 
-      setProgress(
-        "Complete",
-        `Discovered ${discovered.length} domains, but no investment/payment candidates were found.`,
-        100
+    setProgress(
+      `Scanning ${state.domains.length} discovered domains...`
+    );
+
+
+    const scan =
+      await scanDomains(
+        state.domains
       );
 
-      renderResults([]);
 
-      return;
+    state.candidates =
+      Array.isArray(
+        scan.candidates
+      )
+        ? scan.candidates
+        : [];
+
+
+    /*
+     * Use backend count when available.
+     */
+    if (
+      Number.isFinite(
+        Number(
+          scan.paymentMatches
+        )
+      )
+    ) {
+      state.relevantCount =
+        Number(
+          scan.paymentMatches
+        );
     }
 
-    /* -----------------------------------------------------
-       STEP 3 — REMOVE ONLY SUCCESSFULLY AI-ANALYZED
-    ----------------------------------------------------- */
 
-    const filterResult =
+    /*
+     * STEP 3
+     */
+    const candidatesForAi =
       await filterAlreadyAnalyzed(
-        scannedCandidates
+        state.candidates
       );
 
-    const freshCandidates =
-      filterResult.fresh;
 
-    const alreadyAnalyzed =
-      filterResult.alreadyAnalyzed;
+    state.sentToGeminiCount =
+      candidatesForAi.length;
+
 
     setProgress(
-      "Removing previously AI-analyzed...",
-      `${freshCandidates.length} new candidates; ${alreadyAnalyzed} already analyzed by Gemini.`,
-      70
+      `Discovered ${state.discoveredCount} → ` +
+      `${state.candidates.length} relevant → ` +
+      `${state.alreadyAnalyzedCount} already analyzed → ` +
+      `${state.sentToGeminiCount} sent to Gemini`
     );
 
-    /* -----------------------------------------------------
-       IMPORTANT:
-       If there are zero fresh candidates, this means
-       ONLY that every relevant candidate has a successful
-       Gemini result stored in IndexedDB.
-    ----------------------------------------------------- */
 
-    if (!freshCandidates.length) {
-
-      setProgress(
-        "Complete",
-        `${alreadyAnalyzed} matching domains were already successfully analyzed by Gemini. No duplicate AI request was made.`,
-        100
+    /*
+     * STEP 4
+     *
+     * Gemini can be disabled during development.
+     */
+    if (!state.geminiEnabled) {
+      setStatus(
+        "Gemini is OFF."
       );
 
-      renderResults([]);
+      renderResults();
 
       return;
     }
 
-    /* -----------------------------------------------------
-       STEP 4 — GEMINI
-    ----------------------------------------------------- */
+
+    if (!candidatesForAi.length) {
+      setStatus(
+        "No new candidates require Gemini analysis."
+      );
+
+      renderResults();
+
+      return;
+    }
+
+
+    /*
+     * STEP 5
+     */
+    setStatus(
+      `Analyzing ${candidatesForAi.length} candidate(s) with Gemini...`
+    );
+
 
     const aiResponse =
       await analyzeWithGemini(
-        freshCandidates
+        candidatesForAi
       );
 
-    /* -----------------------------------------------------
-       GEMINI FAILED
-       DO NOT mark anything as analyzed.
-    ----------------------------------------------------- */
 
-    if (aiResponse.error) {
-
-      setProgress(
-        "Complete",
-        `Gemini analysis failed. ${freshCandidates.length} candidates remain eligible for AI analysis on the next scan.`,
-        100
-      );
-
-      /*
-       * Show local candidates but DO NOT save them as
-       * aiAnalyzed=true.
-       */
-
-      renderResults(
-        freshCandidates.map(
-          item => ({
-            ...(typeof item === "object"
-              ? item
-              : {
-                  domain: item
-                }),
-
-            scamScore: 0,
-
-            classification:
-              "AI unavailable",
-
-            summary:
-              "Local scan completed. Gemini analysis was unavailable. This domain will be eligible for AI analysis again."
-          })
-        )
-      );
-
-      return;
-    }
-
-    /* -----------------------------------------------------
-       STEP 5 — SAVE SUCCESSFUL AI RESULTS
-    ----------------------------------------------------- */
-
-    const savedCount =
+    /*
+     * STEP 6
+     */
+    const saved =
       await saveAnalysisResults(
+        candidatesForAi,
         aiResponse.results
       );
 
+
     /*
-     * Results returned by Gemini but not successfully
-     * saved remain eligible for a future AI request.
+     * IMPORTANT:
+     * saved count comes only from verified
+     * IndexedDB saves.
      */
+    state.successfullySavedCount =
+      saved;
 
-    const notSaved =
-      Math.max(
-        0,
-        aiResponse.results.length -
-        savedCount
-      );
-
-    /* -----------------------------------------------------
-       STEP 6 — SCAN HISTORY
-    ----------------------------------------------------- */
-
-    const scanRecord = {
-      createdAt:
-        new Date().toISOString(),
-
-      tlds:
-        config.tlds,
-
-      period:
-        config.period,
-
-      paymentMethods:
-        config.paymentMethods,
-
-      discoveredCount:
-        discovered.length,
-
-      candidateCount:
-        scannedCandidates.length,
-
-      previouslyAnalyzedCount:
-        alreadyAnalyzed,
-
-      newCandidateCount:
-        freshCandidates.length,
-
-      geminiReturnedCount:
-        aiResponse.results.length,
-
-      analyzedCount:
-        savedCount,
-
-      unsavedAiResults:
-        notSaved,
-
-      geminiRequests:
-        aiResponse.requestsMade
-    };
-
-    await saveScan(
-      scanRecord
-    );
-
-    /* -----------------------------------------------------
-       STEP 7 — DISPLAY
-    ----------------------------------------------------- */
-
-    renderResults(
-      aiResponse.results
-    );
 
     setProgress(
-      "Complete",
-      `Discovered ${discovered.length} → ${scannedCandidates.length} relevant → ${alreadyAnalyzed} already analyzed → ${freshCandidates.length} sent to Gemini → ${savedCount} successfully saved. Gemini requests: ${aiResponse.requestsMade}.`,
-      100
+      `Discovered ${state.discoveredCount} → ` +
+      `${state.candidates.length} relevant → ` +
+      `${state.alreadyAnalyzedCount} already analyzed → ` +
+      `${state.sentToGeminiCount} sent to Gemini → ` +
+      `${state.successfullySavedCount} successfully saved. ` +
+      `Gemini requests: ${state.geminiRequests}.`
     );
 
+
+    setStatus(
+      saved > 0
+        ? `Gemini analysis saved for ${saved} domain(s).`
+        : "Gemini returned results, but none were successfully saved."
+    );
+
+
+    renderResults();
+
   } catch (error) {
+    state.lastError =
+      error?.message ||
+      "Unknown scan error";
+
 
     console.error(
-      "Scan failed:",
+      "LD76 scan failed:",
       error
     );
 
-    setProgress(
-      "Scan failed",
-      error.message ||
-        "An unexpected error occurred.",
-      100
+
+    setStatus(
+      `Scan error: ${state.lastError}`
     );
 
-    alert(
-      error.message ||
-      "Scan failed. Please try again."
+
+    setProgress(
+      `Discovered ${state.discoveredCount} → ` +
+      `${state.candidates.length} relevant → ` +
+      `${state.alreadyAnalyzedCount} already analyzed → ` +
+      `${state.sentToGeminiCount} sent to Gemini → ` +
+      `${state.successfullySavedCount} successfully saved. ` +
+      `Gemini requests: ${state.geminiRequests}.`
     );
 
   } finally {
+    state.scanning = false;
 
-    setScanning(false);
+    updateScanButton();
   }
 }
 
+
 /* =========================================================
-   RESULT ACTIONS
+   RESULT RENDERING
 ========================================================= */
 
-function handleResultAction(
-  event
-) {
-  const openButton =
-    event.target.closest(
-      "[data-open-url]"
+function renderResults() {
+  const container =
+    $(
+      "#results"
+    ) ||
+    $(
+      "#resultsContainer"
     );
 
-  if (openButton) {
 
-    const url =
-      openButton.dataset.openUrl;
-
-    if (url) {
-
-      window.open(
-        url,
-        "_blank",
-        "noopener,noreferrer"
-      );
-
-    }
-
+  if (!container) {
     return;
   }
 
-  const detailsButton =
-    event.target.closest(
-      "[data-details-domain]"
-    );
 
-  if (detailsButton) {
+  container.innerHTML = "";
 
-    const domain =
-      normalizeDomain(
-        detailsButton.dataset
-          .detailsDomain
-      );
 
-    const result =
-      state.results.find(
-        item =>
-          normalizeDomain(
-            item.domain
-          ) === domain
-      );
-
-    if (result) {
-      showDetails(result);
-    }
-  }
-}
-
-function showDetails(
-  result
-) {
-  const details = [
-
-    `Website: ${
-      result.websiteName ||
-      result.domain
-    }`,
-
-    `Domain: ${
-      result.domain
-    }`,
-
-    `GEMINI SCAM SCORE: ${
-      result.scamScore ??
-      "N/A"
-    }`,
-
-    `Classification: ${
-      result.classification ||
-      getClassification(
-        result.scamScore
-      )
-    }`,
-
-    `Confidence: ${
-      result.confidence ||
-      "Unknown"
-    }`,
-
-    "",
-
-    result.summary ||
-      "No summary available."
-
-  ].join("\n");
-
-  alert(details);
-}
-
-/* =========================================================
-   NAVIGATION
-========================================================= */
-
-function setActiveView(
-  view
-) {
-  state.currentView =
-    view;
-
-  elements.navButtons.forEach(
-    button => {
-
-      button.classList.toggle(
-        "active",
-        button.dataset.view ===
-          view
-      );
-
-    }
-  );
-
-  if (view === "home") {
-
-    elements.resultsSection.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
-
-    return;
-  }
-
-  if (view === "history") {
-
-    showHistory();
-
-    return;
-  }
-
-  if (view === "settings") {
-
-    showSettings();
-
-  }
-}
-
-/* =========================================================
-   HISTORY
-========================================================= */
-
-async function showHistory() {
-  try {
-
-    const domains =
-      await getAllDomains();
-
-    /*
-     * History contains ONLY records where Gemini
-     * analysis was actually completed and saved.
-     */
-
-    const analyzed =
-      domains.filter(
-        item =>
-          item?.aiAnalyzed === true &&
-          item?.aiScore !== null &&
-          item?.aiScore !== undefined
-      );
-
-    if (!analyzed.length) {
-
-      elements.resultsContainer.innerHTML = `
+  if (!state.results.length) {
+    container.innerHTML =
+      `
         <div class="empty-state">
-
-          <div class="empty-icon">
-            📋
-          </div>
-
-          <h3>
-            No history yet
-          </h3>
-
-          <p>
-            Successfully completed Gemini
-            analyses will appear here.
-          </p>
-
+          No Gemini-analyzed results yet.
         </div>
       `;
 
-      return;
-    }
-
-    elements.resultsContainer.innerHTML =
-      analyzed
-        .sort(
-          (a, b) =>
-            new Date(
-              b.lastScanned || 0
-            ) -
-            new Date(
-              a.lastScanned || 0
-            )
-        )
-        .map(
-          item =>
-            renderResultCard(
-              item.aiAnalysis || {
-                domain:
-                  item.domain,
-
-                websiteName:
-                  item.websiteName,
-
-                scamScore:
-                  item.aiScore,
-
-                status:
-                  item.status
-              }
-            )
-        )
-        .join("");
-
-    elements.resultsSection.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
-
-  } catch (error) {
-
-    console.error(
-      "Could not load history:",
-      error
-    );
-
-    alert(
-      "Could not load scan history."
-    );
-  }
-}
-
-/* =========================================================
-   SETTINGS
-========================================================= */
-
-function showSettings() {
-
-  const enabled =
-    localStorage.getItem(
-      "ld76GeminiEnabled"
-    ) === "true";
-
-  const answer =
-    confirm(
-      `Gemini analysis is currently ${
-        enabled
-          ? "ON"
-          : "OFF"
-      }.\n\nPress OK to turn it ${
-        enabled
-          ? "OFF"
-          : "ON"
-      }.`
-    );
-
-  if (!answer) {
     return;
   }
 
-  const newValue =
-    !enabled;
 
-  localStorage.setItem(
-    "ld76GeminiEnabled",
-    String(newValue)
-  );
+  for (
+    const result
+    of state.results
+  ) {
+    container.appendChild(
+      createResultCard(
+        result
+      )
+    );
+  }
+}
 
-  state.geminiEnabled =
-    newValue;
 
-  alert(
-    `Gemini analysis is now ${
-      newValue
-        ? "ON"
-        : "OFF"
-    }.`
+function createResultCard(
+  result
+) {
+  const card =
+    document.createElement(
+      "article"
+    );
+
+
+  card.className =
+    "result-card";
+
+
+  const score =
+    Number(
+      result.aiScore
+    );
+
+
+  card.innerHTML =
+    `
+      <div class="result-header">
+        <div>
+          <div class="result-label">
+            🚨 GEMINI SCAM SCORE
+          </div>
+
+          <div class="result-score">
+            ${escapeHtml(
+              String(score)
+            )}
+            / 100
+          </div>
+
+          <div class="result-band">
+            ${escapeHtml(
+              result.aiBand ||
+              scamBand(score)
+            )}
+          </div>
+        </div>
+
+        <div class="result-confidence">
+          Confidence:
+          ${escapeHtml(
+            result.confidence ||
+            "Unknown"
+          )}
+        </div>
+      </div>
+
+      <div class="result-domain">
+        ${escapeHtml(
+          result.domain
+        )}
+      </div>
+
+      <div class="result-analysis">
+        ${escapeHtml(
+          result.aiAnalysis ||
+          "No analysis text returned."
+        )}
+      </div>
+
+      ${
+        Array.isArray(
+          result.aiRedFlags
+        ) &&
+        result.aiRedFlags.length
+          ? `
+            <div class="result-flags">
+              <strong>Red Flags</strong>
+              <ul>
+                ${result.aiRedFlags
+                  .map(
+                    flag =>
+                      `<li>${escapeHtml(
+                        flag
+                      )}</li>`
+                  )
+                  .join("")}
+              </ul>
+            </div>
+          `
+          : ""
+      }
+
+      <div class="result-actions">
+        ${
+          result.finalUrl
+            ? `
+              <a
+                href="${escapeAttribute(
+                  result.finalUrl
+                )}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="open-website"
+              >
+                OPEN WEBSITE
+              </a>
+            `
+            : ""
+        }
+      </div>
+    `;
+
+
+  return card;
+}
+
+
+/* =========================================================
+   SCORE BANDS
+========================================================= */
+
+function scamBand(
+  score
+) {
+  const value =
+    Number(score);
+
+
+  if (value <= 20) {
+    return "Very Low Scam Indicators";
+  }
+
+
+  if (value <= 40) {
+    return "Low";
+  }
+
+
+  if (value <= 60) {
+    return "Moderate / Uncertain";
+  }
+
+
+  if (value <= 80) {
+    return "Suspicious";
+  }
+
+
+  return "Highly Suspicious";
+}
+
+
+/* =========================================================
+   CONFIDENCE
+========================================================= */
+
+function normalizeConfidence(
+  value
+) {
+  const text =
+    String(
+      value || ""
+    )
+      .trim()
+      .toLowerCase();
+
+
+  if (
+    text === "high"
+  ) {
+    return "High";
+  }
+
+
+  if (
+    text === "medium" ||
+    text === "moderate"
+  ) {
+    return "Medium";
+  }
+
+
+  if (
+    text === "low"
+  ) {
+    return "Low";
+  }
+
+
+  return value
+    ? String(value)
+    : "Unknown";
+}
+
+
+/* =========================================================
+   STRING ARRAYS
+========================================================= */
+
+function normalizeStringArray(
+  value
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+
+  return value
+    .map(
+      item =>
+        String(
+          item
+        ).trim()
+    )
+    .filter(Boolean)
+    .slice(
+      0,
+      50
+    );
+}
+
+
+/* =========================================================
+   DOMAIN NORMALIZATION
+========================================================= */
+
+function normalizeDomain(
+  value
+) {
+  if (!value) {
+    return "";
+  }
+
+
+  let domain =
+    String(value)
+      .trim()
+      .toLowerCase();
+
+
+  domain =
+    domain.replace(
+      /^https?:\/\//,
+      ""
+    );
+
+
+  domain =
+    domain.replace(
+      /^www\./,
+      ""
+    );
+
+
+  domain =
+    domain.split(
+      "/"
+    )[0];
+
+
+  domain =
+    domain.split(
+      "?"
+    )[0];
+
+
+  domain =
+    domain.split(
+      "#"
+    )[0];
+
+
+  domain =
+    domain.replace(
+      /\.$/,
+      ""
+    );
+
+
+  return domain.trim();
+}
+
+
+/* =========================================================
+   HTML ESCAPE
+========================================================= */
+
+function escapeHtml(
+  value
+) {
+  return String(
+    value ?? ""
+  )
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+}
+
+
+function escapeAttribute(
+  value
+) {
+  return escapeHtml(
+    value
   );
 }
 
+
 /* =========================================================
-   EVENT LISTENERS
+   SCAN BUTTON
 ========================================================= */
 
-elements.periodButtons.forEach(
-  button => {
+function updateScanButton() {
+  const buttons =
+    document.querySelectorAll(
+      "#findSites, #findNewSites, #scanButton, [data-action='scan']"
+    );
 
-    button.addEventListener(
-      "click",
-      () => {
 
-        state.period =
-          button.dataset.period;
+  buttons.forEach(
+    button => {
+      button.disabled =
+        state.scanning;
 
-        updatePeriodButtons();
-
-        saveSettings();
-
+      if (
+        state.scanning
+      ) {
+        button.textContent =
+          "SCANNING...";
+      } else {
+        button.textContent =
+          "FIND NEW SITES";
       }
-    );
-
-  }
-);
-
-elements.tldSelect.addEventListener(
-  "change",
-  saveSettings
-);
-
-[
-  elements.paymentBank,
-  elements.paymentEasypaisa,
-  elements.paymentJazzcash,
-  elements.paymentCrypto
-].forEach(
-  input => {
-
-    input.addEventListener(
-      "change",
-      saveSettings
-    );
-
-  }
-);
-
-elements.findSitesButton.addEventListener(
-  "click",
-  startScan
-);
-
-elements.refreshResultsButton.addEventListener(
-  "click",
-  () => {
-
-    if (
-      state.currentView ===
-      "history"
-    ) {
-
-      showHistory();
-
-      return;
     }
+  );
+}
 
-    renderResults(
-      state.results
+
+/* =========================================================
+   UI SETTINGS
+========================================================= */
+
+function readSettingsFromUI() {
+  const tldSelect =
+    $(
+      "#tld"
+    ) ||
+    $(
+      "#tldSelect"
     );
 
+
+  if (tldSelect?.value) {
+    state.selectedTld =
+      tldSelect.value;
   }
-);
 
-elements.settingsButton.addEventListener(
-  "click",
-  showSettings
-);
 
-elements.resultsContainer.addEventListener(
-  "click",
-  handleResultAction
-);
+  const period =
+    document.querySelector(
+      "input[name='period']:checked"
+    );
 
-elements.navButtons.forEach(
-  button => {
 
-    button.addEventListener(
-      "click",
-      () => {
+  if (period?.value) {
+    state.selectedPeriod =
+      period.value;
+  }
 
-        setActiveView(
-          button.dataset.view
+
+  const paymentInputs =
+    document.querySelectorAll(
+      "input[name='paymentMethods']:checked, input[data-payment]:checked"
+    );
+
+
+  if (paymentInputs.length) {
+    state.paymentMethods =
+      Array.from(
+        paymentInputs
+      )
+        .map(
+          input =>
+            input.value ||
+            input.dataset.payment
+        )
+        .map(
+          value =>
+            String(
+              value || ""
+            )
+              .trim()
+              .toLowerCase()
+        )
+        .filter(
+          value =>
+            [
+              "bank",
+              "easypaisa",
+              "jazzcash",
+              "crypto"
+            ].includes(value)
         );
+  }
+}
 
-      }
+
+/* =========================================================
+   GEMINI TOGGLE
+========================================================= */
+
+function setupGeminiToggle() {
+  const toggles =
+    document.querySelectorAll(
+      "#geminiToggle, #geminiEnabled, [data-gemini-toggle]"
     );
 
-  }
-);
+
+  toggles.forEach(
+    toggle => {
+      toggle.checked =
+        state.geminiEnabled;
+
+
+      toggle.addEventListener(
+        "change",
+        () => {
+          state.geminiEnabled =
+            Boolean(
+              toggle.checked
+            );
+
+
+          toggles.forEach(
+            other => {
+              other.checked =
+                state.geminiEnabled;
+            }
+          );
+
+
+          console.log(
+            "Gemini enabled:",
+            state.geminiEnabled
+          );
+        }
+      );
+    }
+  );
+}
+
+
+/* =========================================================
+   EVENT SETUP
+========================================================= */
+
+function setupEvents() {
+  const scanButtons =
+    document.querySelectorAll(
+      "#findSites, #findNewSites, #scanButton, [data-action='scan']"
+    );
+
+
+  scanButtons.forEach(
+    button => {
+      button.addEventListener(
+        "click",
+        async event => {
+          event.preventDefault();
+
+          readSettingsFromUI();
+
+          await startScan();
+        }
+      );
+    }
+  );
+}
+
 
 /* =========================================================
    INITIALIZATION
 ========================================================= */
 
-async function initializeApp() {
+function initializeApp() {
+  console.log(
+    "LD76 Investment Radar initialized."
+  );
 
-  loadSettings();
 
-  state.geminiEnabled =
-    localStorage.getItem(
-      "ld76GeminiEnabled"
-    ) === "true";
+  setupGeminiToggle();
 
-  try {
+  setupEvents();
 
-    await openDatabase();
+  updateScanButton();
 
-  } catch (error) {
 
-    console.error(
-      "IndexedDB initialization failed.",
-      error
-    );
+  setStatus(
+    "Ready."
+  );
 
-  }
 
-  if (
-    "serviceWorker" in
-    navigator
-  ) {
-
-    try {
-
-      await navigator.serviceWorker.register(
-        "/sw.js"
-      );
-
-    } catch (error) {
-
-      console.warn(
-        "Service worker registration failed.",
-        error
-      );
-
-    }
-
-  }
-
-  updatePeriodButtons();
+  setProgress(
+    "Select TLD, period and payment methods."
+  );
 }
 
-initializeApp();
+
+if (
+  document.readyState ===
+  "loading"
+) {
+  document.addEventListener(
+    "DOMContentLoaded",
+    initializeApp
+  );
+} else {
+  initializeApp();
+        }
