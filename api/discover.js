@@ -2,32 +2,34 @@
 
 /*
  * LD76 INVESTMENT RADAR
- * Dual Certificate Transparency Discovery
  *
- * Sources:
- *   1. crt.sh
- *   2. ctlogs.dev
+ * DISCOVERY PIPELINE
  *
- * Both sources are queried for every selected TLD.
- * Results are merged and deduplicated.
+ * CT logs = discovery LEAD ONLY.
+ * RDAP     = registration-date verification.
  *
- * If one source fails, the other can still provide results.
+ * HARD RULE:
+ * A domain is returned only when:
  *
- * IMPORTANT:
- * Certificate Transparency discovery time is NOT
- * the same thing as verified domain registration time.
+ * 1. It was recently observed in Certificate Transparency.
+ * 2. RDAP returned an authoritative registration event.
+ * 3. The RDAP registration date is inside the selected
+ *    24H / 48H window.
+ *
+ * CT certificate time is NEVER treated as registration time.
  */
 
-const MAX_RESULTS = 500;
+const MAX_DISCOVERY_ROWS = 5000;
 
-const REQUEST_TIMEOUT_MS = 15000;
+const CT_TIMEOUT_MS = 15000;
+const RDAP_TIMEOUT_MS = 4500;
 
-const MAX_RETRIES = 2;
+const CT_RETRIES = 2;
+const RDAP_RETRIES = 1;
 
-const RETRY_DELAYS_MS = [
-  800,
-  1800
-];
+const RDAP_CONCURRENCY = 40;
+
+const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
 
 /* =========================================================
@@ -39,9 +41,7 @@ function normalizeTld(value) {
     return null;
   }
 
-  let tld = value
-    .trim()
-    .toLowerCase();
+  let tld = value.trim().toLowerCase();
 
   if (!tld) {
     return null;
@@ -68,21 +68,11 @@ function normalizePeriod(body) {
     }
   }
 
-  if (typeof body?.period === "string") {
-    const period = body.period
-      .trim()
-      .toLowerCase();
+  const period = String(
+    body?.period || "24h"
+  ).trim().toLowerCase();
 
-    if (period === "24h") {
-      return 24;
-    }
-
-    if (period === "48h") {
-      return 48;
-    }
-  }
-
-  return 24;
+  return period === "48h" ? 48 : 24;
 }
 
 
@@ -105,14 +95,10 @@ function normalizeDomain(value) {
     ""
   );
 
-  domain = domain.split("/")[0];
-
-  domain = domain.split("?")[0];
-
-  domain = domain.replace(
-    /\.$/,
-    ""
-  );
+  domain = domain
+    .split("/")[0]
+    .split("?")[0]
+    .replace(/\.$/, "");
 
   if (!domain) {
     return null;
@@ -120,8 +106,7 @@ function normalizeDomain(value) {
 
   if (
     domain.length > 253 ||
-    domain.includes(" ") ||
-    domain.includes("\\")
+    /\s|\\/.test(domain)
   ) {
     return null;
   }
@@ -138,9 +123,9 @@ function normalizeDomain(value) {
 
 
 function sleep(ms) {
-  return new Promise(resolve =>
-    setTimeout(resolve, ms)
-  );
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
 }
 
 
@@ -148,13 +133,16 @@ function sleep(ms) {
  * HTTP
  * ========================================================= */
 
-async function fetchText(url) {
+async function fetchText(
+  url,
+  timeoutMs
+) {
   const controller =
     new AbortController();
 
   const timer = setTimeout(
     () => controller.abort(),
-    REQUEST_TIMEOUT_MS
+    timeoutMs
   );
 
   try {
@@ -198,46 +186,47 @@ async function fetchText(url) {
 }
 
 
-async function fetchJsonWithRetry(url) {
+async function fetchJsonWithRetry(
+  url,
+  timeoutMs,
+  retries
+) {
   let lastError = null;
 
   for (
     let attempt = 0;
-    attempt <= MAX_RETRIES;
+    attempt <= retries;
     attempt++
   ) {
     try {
       const text =
-        await fetchText(url);
-
-      let data;
+        await fetchText(
+          url,
+          timeoutMs
+        );
 
       try {
-        data = JSON.parse(text);
+        return {
+          ok: true,
+          data: JSON.parse(text),
+          attempts: attempt + 1,
+          error: null
+        };
       } catch {
         throw new Error(
           "Invalid JSON response"
         );
       }
-
-      return {
-        ok: true,
-        data,
-        attempts:
-          attempt + 1,
-        error: null
-      };
     } catch (error) {
       lastError =
         error?.message ||
         "Unknown request error";
 
-      if (
-        attempt < MAX_RETRIES
-      ) {
+      if (attempt < retries) {
         await sleep(
-          RETRY_DELAYS_MS[attempt] ||
-          1500
+          attempt === 0
+            ? 700
+            : 1500
         );
       }
     }
@@ -246,8 +235,7 @@ async function fetchJsonWithRetry(url) {
   return {
     ok: false,
     data: null,
-    attempts:
-      MAX_RETRIES + 1,
+    attempts: retries + 1,
     error: lastError
   };
 }
@@ -258,6 +246,14 @@ async function fetchJsonWithRetry(url) {
  * ========================================================= */
 
 function buildCrtUrl(tld) {
+  /*
+   * crt.sh expects:
+   * %.top
+   * %.xyz
+   *
+   * Encode exactly once.
+   */
+
   const wildcard = `%${tld}`;
 
   return (
@@ -269,229 +265,67 @@ function buildCrtUrl(tld) {
 
 
 async function queryCrtSh(tld) {
-  const url =
-    buildCrtUrl(tld);
-
-  const started =
-    Date.now();
-
   const result =
-    await fetchJsonWithRetry(url);
+    await fetchJsonWithRetry(
+      buildCrtUrl(tld),
+      CT_TIMEOUT_MS,
+      CT_RETRIES
+    );
 
-  if (
-    !result.ok
-  ) {
-    return {
-      source:
-        "crt.sh",
-
-      ok: false,
-
-      rows: [],
-
-      durationMs:
-        Date.now() - started,
-
-      attempts:
-        result.attempts,
-
-      error:
-        result.error,
-
-      url
-    };
+  if (!result.ok) {
+    throw new Error(
+      result.error ||
+      "crt.sh request failed"
+    );
   }
 
-  if (
-    !Array.isArray(
-      result.data
-    )
-  ) {
-    return {
-      source:
-        "crt.sh",
-
-      ok: false,
-
-      rows: [],
-
-      durationMs:
-        Date.now() - started,
-
-      attempts:
-        result.attempts,
-
-      error:
-        "crt.sh JSON was not an array",
-
-      url
-    };
+  if (!Array.isArray(result.data)) {
+    throw new Error(
+      "crt.sh JSON was not an array"
+    );
   }
 
-  return {
-    source:
-      "crt.sh",
-
-    ok: true,
-
-    rows:
-      result.data,
-
-    durationMs:
-      Date.now() - started,
-
-    attempts:
-      result.attempts,
-
-    error: null,
-
-    url
-  };
-}
-
-
-/* =========================================================
- * CTLOGS.DEV
- * ========================================================= */
-
-function buildCtlogsUrl(tld) {
-  /*
-   * ctlogs.dev accepts the same wildcard style:
-   *
-   * *.top
-   * *.xyz
-   *
-   * Their search endpoint supports:
-   *
-   * /search?q=...&output=json
-   */
-
-  const wildcard =
-    `*${tld}`;
-
-  return (
-    "https://ctlogs.dev/search?q=" +
-    encodeURIComponent(
-      wildcard
-    ) +
-    "&output=json"
+  return result.data.slice(
+    0,
+    MAX_DISCOVERY_ROWS
   );
 }
 
 
-async function queryCtlogsDev(tld) {
-  const url =
-    buildCtlogsUrl(tld);
+/* =========================================================
+ * CT DATE + DOMAIN EXTRACTION
+ * ========================================================= */
 
-  const started =
-    Date.now();
+function getCertificateDate(row) {
+  const values = [
+    row?.entry_timestamp,
+    row?.min_entry_timestamp,
+    row?.entry_time,
+    row?.not_before
+  ];
 
-  const result =
-    await fetchJsonWithRetry(url);
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
 
-  if (
-    !result.ok
-  ) {
-    return {
-      source:
-        "ctlogs.dev",
+    const date =
+      new Date(value);
 
-      ok: false,
-
-      rows: [],
-
-      durationMs:
-        Date.now() - started,
-
-      attempts:
-        result.attempts,
-
-      error:
-        result.error,
-
-      url
-    };
+    if (
+      !Number.isNaN(
+        date.getTime()
+      )
+    ) {
+      return date;
+    }
   }
 
-  /*
-   * ctlogs.dev's search endpoint
-   * can return either:
-   *
-   * [
-   *   {...}
-   * ]
-   *
-   * or an envelope:
-   *
-   * {
-   *   rows: [...]
-   * }
-   */
-
-  let rows = [];
-
-  if (
-    Array.isArray(
-      result.data
-    )
-  ) {
-    rows =
-      result.data;
-  } else if (
-    Array.isArray(
-      result.data?.rows
-    )
-  ) {
-    rows =
-      result.data.rows;
-  } else {
-    return {
-      source:
-        "ctlogs.dev",
-
-      ok: false,
-
-      rows: [],
-
-      durationMs:
-        Date.now() - started,
-
-      attempts:
-        result.attempts,
-
-      error:
-        "ctlogs.dev returned an unsupported JSON structure",
-
-      url
-    };
-  }
-
-  return {
-    source:
-      "ctlogs.dev",
-
-    ok: true,
-
-    rows,
-
-    durationMs:
-      Date.now() - started,
-
-    attempts:
-      result.attempts,
-
-    error: null,
-
-    url
-  };
+  return null;
 }
 
 
-/* =========================================================
- * EXTRACT CRT.SH ROW
- * ========================================================= */
-
-function extractCrtNames(row) {
+function extractNames(row) {
   const names = [];
 
   if (
@@ -518,170 +352,30 @@ function extractCrtNames(row) {
 }
 
 
-function getCrtDate(row) {
-  const fields = [
-    row?.entry_timestamp,
-    row?.min_entry_timestamp,
-    row?.entry_time,
-    row?.not_before
-  ];
-
-  for (
-    const value of fields
-  ) {
-    if (!value) {
-      continue;
-    }
-
-    const date =
-      new Date(value);
-
-    if (
-      !Number.isNaN(
-        date.getTime()
-      )
-    ) {
-      return date;
-    }
-  }
-
-  return null;
-}
-
-
-/* =========================================================
- * EXTRACT CTLOGS.DEV ROW
- * ========================================================= */
-
-function extractCtlogsNames(row) {
-  const names = [];
-
-  if (
-    typeof row?.match ===
-    "string"
-  ) {
-    names.push(
-      row.match
-    );
-  }
-
-  if (
-    typeof row?.subject_cn ===
-    "string"
-  ) {
-    names.push(
-      row.subject_cn
-    );
-  }
-
-  /*
-   * Some response variants may expose
-   * domain names directly.
-   */
-
-  if (
-    Array.isArray(
-      row?.domains
-    )
-  ) {
-    names.push(
-      ...row.domains
-    );
-  }
-
-  return names;
-}
-
-
-function getCtlogsDate(row) {
-  const fields = [
-    row?.not_before,
-    row?.precert_first_seen,
-    row?.final_first_seen
-  ];
-
-  for (
-    const value of fields
-  ) {
-    if (!value) {
-      continue;
-    }
-
-    const date =
-      new Date(value);
-
-    if (
-      !Number.isNaN(
-        date.getTime()
-      )
-    ) {
-      return date;
-    }
-  }
-
-  return null;
-}
-
-
-/* =========================================================
- * GENERIC EXTRACTION
- * ========================================================= */
-
-function extractSourceDomains(
-  sourceResult,
+function collectCtCandidates(
+  rows,
   tld,
-  cutoffTime
+  cutoff
 ) {
-  const all =
-    new Map();
-
-  const recent =
+  const domains =
     new Map();
 
   let rowsWithNames = 0;
-
   let rowsWithDates = 0;
 
-  for (
-    const row
-    of sourceResult.rows
-  ) {
+  for (const row of rows) {
     if (
       !row ||
-      typeof row !==
-        "object"
+      typeof row !== "object"
     ) {
       continue;
     }
 
-    let names;
+    const certificateDate =
+      getCertificateDate(row);
 
-    let certificateDate;
-
-    if (
-      sourceResult.source ===
-      "crt.sh"
-    ) {
-      names =
-        extractCrtNames(
-          row
-        );
-
-      certificateDate =
-        getCrtDate(
-          row
-        );
-    } else {
-      names =
-        extractCtlogsNames(
-          row
-        );
-
-      certificateDate =
-        getCtlogsDate(
-          row
-        );
-    }
+    const names =
+      extractNames(row);
 
     if (names.length) {
       rowsWithNames++;
@@ -691,791 +385,558 @@ function extractSourceDomains(
       rowsWithDates++;
     }
 
-    for (
-      const rawName
-      of names
+    /*
+     * We only need CT observations
+     * inside the requested discovery window.
+     */
+
+    if (
+      !certificateDate ||
+      certificateDate.getTime() < cutoff
     ) {
+      continue;
+    }
+
+    for (const rawName of names) {
       const domain =
-        normalizeDomain(
-          rawName
-        );
+        normalizeDomain(rawName);
 
       if (!domain) {
         continue;
       }
 
-      /*
-       * Exact selected TLD.
-       */
-      if (
-        !domain.endsWith(
-          tld
-        )
-      ) {
+      if (!domain.endsWith(tld)) {
         continue;
       }
 
-      /*
-       * Must actually have a domain
-       * before the TLD.
-       */
       const suffixStart =
         domain.length -
         tld.length;
 
-      if (
-        suffixStart <= 0
-      ) {
+      if (suffixStart <= 0) {
         continue;
       }
 
       const discoveredAt =
-        certificateDate
-          ? certificateDate.toISOString()
-          : null;
-
-      const record = {
-        domain,
-
-        discoveredAt,
-
-        registeredAt:
-          null,
-
-        registrationVerified:
-          false,
-
-        source:
-          sourceResult.source,
-
-        discoveryEvidence:
-          "certificate-transparency"
-      };
+        certificateDate.toISOString();
 
       const existing =
-        all.get(
-          domain
-        );
+        domains.get(domain);
 
-      /*
-       * Keep newest observation.
-       */
       if (
         !existing ||
-        (
-          discoveredAt &&
-          (
-            !existing.discoveredAt ||
-            new Date(
-              discoveredAt
-            ).getTime() >
-            new Date(
-              existing.discoveredAt
-            ).getTime()
-          )
-        )
+        new Date(discoveredAt).getTime() >
+          new Date(existing.discoveredAt).getTime()
       ) {
-        all.set(
+        domains.set(
           domain,
-          record
-        );
-      }
-
-      /*
-       * Recent CT observation.
-       */
-      if (
-        certificateDate &&
-        certificateDate.getTime() >=
-          cutoffTime
-      ) {
-        const existingRecent =
-          recent.get(
-            domain
-          );
-
-        if (
-          !existingRecent ||
-          (
-            discoveredAt &&
-            (
-              !existingRecent.discoveredAt ||
-              new Date(
-                discoveredAt
-              ).getTime() >
-              new Date(
-                existingRecent.discoveredAt
-              ).getTime()
-            )
-          )
-        ) {
-          recent.set(
+          {
             domain,
-            record
-          );
-        }
+            discoveredAt,
+            discoveryEvidence:
+              "certificate-transparency"
+          }
+        );
       }
     }
   }
 
   return {
-    all,
-    recent,
+    candidates:
+      [...domains.values()],
+
     rowsWithNames,
+
     rowsWithDates
   };
 }
 
 
 /* =========================================================
- * MERGE RECORD
+ * RDAP REGISTRATION VERIFICATION
  * ========================================================= */
 
-function mergeRecord(
-  existing,
-  incoming
+function extractRegistrationDate(
+  rdap
 ) {
-  if (!existing) {
-    return incoming;
-  }
+  const events =
+    Array.isArray(rdap?.events)
+      ? rdap.events
+      : [];
 
   /*
-   * Prefer the newest discovery time.
+   * IMPORTANT:
+   * Only an actual RDAP "registration"
+   * event is accepted.
+   *
+   * expiration,
+   * last changed,
+   * transfer,
+   * last update
+   * are NOT registration dates.
    */
-  const existingTime =
-    existing.discoveredAt
-      ? new Date(
-          existing.discoveredAt
-        ).getTime()
-      : 0;
 
-  const incomingTime =
-    incoming.discoveredAt
-      ? new Date(
-          incoming.discoveredAt
-        ).getTime()
-      : 0;
-
-  const newer =
-    incomingTime >
-    existingTime
-      ? incoming
-      : existing;
-
-  /*
-   * Record both sources when
-   * possible.
-   */
-  const sources =
-    new Set();
-
-  if (
-    Array.isArray(
-      existing.sources
-    )
-  ) {
-    for (
-      const source
-      of existing.sources
-    ) {
-      sources.add(
-        source
+  const registration =
+    events.find(event => {
+      return (
+        String(
+          event?.eventAction || ""
+        )
+          .trim()
+          .toLowerCase() ===
+        "registration"
       );
-    }
-  } else if (
-    existing.source
-  ) {
-    sources.add(
-      existing.source
-    );
+    });
+
+  if (!registration?.eventDate) {
+    return null;
   }
 
+  const date =
+    new Date(
+      registration.eventDate
+    );
+
   if (
-    Array.isArray(
-      incoming.sources
+    Number.isNaN(
+      date.getTime()
     )
   ) {
-    for (
-      const source
-      of incoming.sources
-    ) {
-      sources.add(
-        source
-      );
-    }
-  } else if (
-    incoming.source
-  ) {
-    sources.add(
-      incoming.source
+    return null;
+  }
+
+  return date;
+}
+
+
+async function verifyRegistration(
+  domain
+) {
+  const url =
+    "https://rdap.org/domain/" +
+    encodeURIComponent(domain);
+
+  const result =
+    await fetchJsonWithRetry(
+      url,
+      RDAP_TIMEOUT_MS,
+      RDAP_RETRIES
     );
+
+  if (!result.ok) {
+    return {
+      verified: false,
+      registeredAt: null,
+      error:
+        result.error ||
+        "RDAP verification failed"
+    };
+  }
+
+  const registeredAt =
+    extractRegistrationDate(
+      result.data
+    );
+
+  if (!registeredAt) {
+    return {
+      verified: false,
+      registeredAt: null,
+      error:
+        "RDAP returned no authoritative registration event"
+    };
   }
 
   return {
-    ...newer,
-
-    sources:
-      Array.from(
-        sources
-      ),
-
-    source:
-      Array.from(
-        sources
-      ).join("+")
+    verified: true,
+    registeredAt:
+      registeredAt.toISOString(),
+    error: null
   };
 }
 
 
 /* =========================================================
- * HANDLER
+ * CONCURRENCY
+ * ========================================================= */
+
+async function runWithConcurrency(
+  items,
+  limit,
+  worker
+) {
+  const results =
+    new Array(items.length);
+
+  let nextIndex = 0;
+
+  async function runner() {
+    while (true) {
+      const index =
+        nextIndex++;
+
+      if (
+        index >= items.length
+      ) {
+        return;
+      }
+
+      try {
+        results[index] =
+          await worker(
+            items[index],
+            index
+          );
+      } catch (error) {
+        results[index] = {
+          ...items[index],
+
+          registrationVerified:
+            false,
+
+          registeredAt:
+            null,
+
+          registrationInWindow:
+            false,
+
+          registrationError:
+            error?.message ||
+            "Verification failed"
+        };
+      }
+    }
+  }
+
+  const workers =
+    Math.min(
+      limit,
+      items.length
+    );
+
+  await Promise.all(
+    Array.from(
+      {
+        length: workers
+      },
+      runner
+    )
+  );
+
+  return results;
+}
+
+
+/* =========================================================
+ * MAIN HANDLER
  * ========================================================= */
 
 export default async function handler(
   req,
   res
 ) {
-  if (
-    req.method !==
-    "POST"
-  ) {
-    return res
-      .status(405)
-      .json({
-        ok: false,
-
-        error:
-          "Method not allowed. Use POST."
-      });
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      ok: false,
+      error:
+        "Method not allowed. Use POST."
+    });
   }
+
+  const started =
+    Date.now();
 
   try {
     const body =
       req.body || {};
 
-    let requestedTlds =
-      [];
-
-    if (
-      Array.isArray(
-        body.tlds
-      )
-    ) {
-      requestedTlds =
-        body.tlds;
-    } else if (
-      typeof body.tld ===
-      "string"
-    ) {
-      requestedTlds = [
-        body.tld
-      ];
-    }
-
-    const tlds =
-      [
-        ...new Set(
-          requestedTlds
-            .map(
-              normalizeTld
-            )
-            .filter(Boolean)
-        )
-      ];
-
-    if (!tlds.length) {
-      return res
-        .status(400)
-        .json({
-          ok: false,
-
-          error:
-            "No valid TLD selected."
-        });
-    }
+    const tld =
+      normalizeTld(
+        body.tld ||
+        body.tldValue
+      );
 
     const periodHours =
-      normalizePeriod(
-        body
-      );
+      normalizePeriod(body);
+
+    if (!tld) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid TLD"
+      });
+    }
 
     const now =
       Date.now();
 
-    const cutoffTime =
+    const cutoff =
       now -
       periodHours *
-        60 *
-        60 *
-        1000;
+      60 *
+      60 *
+      1000;
 
+    /* ---------------------------------------------
+     * CT DISCOVERY
+     * ------------------------------------------- */
 
-    const allCandidates =
-      new Map();
+    let rows;
 
-    const recentCandidates =
-      new Map();
+    try {
+      rows =
+        await queryCrtSh(tld);
+    } catch (error) {
+      console.error(
+        "CT discovery failed:",
+        error
+      );
 
-    const sourceStatus =
-      [];
-
-
-    /* =====================================================
-     * QUERY BOTH SOURCES FOR EVERY TLD
-     *
-     * Promise.all means crt.sh and ctlogs.dev
-     * are attempted at the same time.
-     * ===================================================== */
-
-    for (
-      const tld
-      of tlds
-    ) {
-      const [
-        crtResult,
-        ctlogsResult
-      ] = await Promise.all([
-        queryCrtSh(tld),
-        queryCtlogsDev(tld)
-      ]);
-
-
-      /* -----------------------------------------------
-       * Process crt.sh
-       * ----------------------------------------------- */
-
-      if (
-        crtResult.ok
-      ) {
-        const extracted =
-          extractSourceDomains(
-            crtResult,
-            tld,
-            cutoffTime
-          );
-
-        for (
-          const [
-            domain,
-            record
-          ]
-          of extracted.all
-        ) {
-          const merged =
-            mergeRecord(
-              allCandidates.get(
-                domain
-              ),
-              record
-            );
-
-          allCandidates.set(
-            domain,
-            merged
-          );
-        }
-
-        for (
-          const [
-            domain,
-            record
-          ]
-          of extracted.recent
-        ) {
-          const merged =
-            mergeRecord(
-              recentCandidates.get(
-                domain
-              ),
-              record
-            );
-
-          recentCandidates.set(
-            domain,
-            merged
-          );
-        }
-
-        sourceStatus.push({
-          source:
-            "crt.sh",
-
-          tld,
-
-          queryWorked:
-            true,
-
-          rowsReceived:
-            crtResult.rows.length,
-
-          rowsWithNames:
-            extracted.rowsWithNames,
-
-          rowsWithDates:
-            extracted.rowsWithDates,
-
-          allMatchingDomains:
-            extracted.all.size,
-
-          recentMatchingDomains:
-            extracted.recent.size,
-
-          attempts:
-            crtResult.attempts,
-
-          durationMs:
-            crtResult.durationMs,
-
-          error:
-            null
-        });
-      } else {
-        sourceStatus.push({
-          source:
-            "crt.sh",
-
-          tld,
-
-          queryWorked:
-            false,
-
-          rowsReceived:
-            0,
-
-          rowsWithNames:
-            0,
-
-          rowsWithDates:
-            0,
-
-          allMatchingDomains:
-            0,
-
-          recentMatchingDomains:
-            0,
-
-          attempts:
-            crtResult.attempts,
-
-          durationMs:
-            crtResult.durationMs,
-
-          error:
-            crtResult.error
-        });
-      }
-
-
-      /* -----------------------------------------------
-       * Process ctlogs.dev
-       * ----------------------------------------------- */
-
-      if (
-        ctlogsResult.ok
-      ) {
-        const extracted =
-          extractSourceDomains(
-            ctlogsResult,
-            tld,
-            cutoffTime
-          );
-
-        for (
-          const [
-            domain,
-            record
-          ]
-          of extracted.all
-        ) {
-          const merged =
-            mergeRecord(
-              allCandidates.get(
-                domain
-              ),
-              record
-            );
-
-          allCandidates.set(
-            domain,
-            merged
-          );
-        }
-
-        for (
-          const [
-            domain,
-            record
-          ]
-          of extracted.recent
-        ) {
-          const merged =
-            mergeRecord(
-              recentCandidates.get(
-                domain
-              ),
-              record
-            );
-
-          recentCandidates.set(
-            domain,
-            merged
-          );
-        }
-
-        sourceStatus.push({
-          source:
-            "ctlogs.dev",
-
-          tld,
-
-          queryWorked:
-            true,
-
-          rowsReceived:
-            ctlogsResult.rows.length,
-
-          rowsWithNames:
-            extracted.rowsWithNames,
-
-          rowsWithDates:
-            extracted.rowsWithDates,
-
-          allMatchingDomains:
-            extracted.all.size,
-
-          recentMatchingDomains:
-            extracted.recent.size,
-
-          attempts:
-            ctlogsResult.attempts,
-
-          durationMs:
-            ctlogsResult.durationMs,
-
-          error:
-            null
-        });
-      } else {
-        sourceStatus.push({
-          source:
-            "ctlogs.dev",
-
-          tld,
-
-          queryWorked:
-            false,
-
-          rowsReceived:
-            0,
-
-          rowsWithNames:
-            0,
-
-          rowsWithDates:
-            0,
-
-          allMatchingDomains:
-            0,
-
-          recentMatchingDomains:
-            0,
-
-          attempts:
-            ctlogsResult.attempts,
-
-          durationMs:
-            ctlogsResult.durationMs,
-
-          error:
-            ctlogsResult.error
-        });
-      }
+      return res.status(502).json({
+        ok: false,
+        stage:
+          "ct-discovery",
+        error:
+          error?.message ||
+          "Certificate Transparency discovery failed"
+      });
     }
 
+    const ctData =
+      collectCtCandidates(
+        rows,
+        tld,
+        cutoff
+      );
 
-    /* =====================================================
-     * SELECT RECENT RESULTS
-     * ===================================================== */
-
-    let selected;
-
-    let selectionMode;
-
-    if (
-      recentCandidates.size >
-      0
-    ) {
-      selected =
-        Array.from(
-          recentCandidates.values()
-        );
-
-      selectionMode =
-        "recent";
-    } else {
-      /*
-       * If CT timestamps are unavailable,
-       * don't falsely report zero.
-       */
-      selected =
-        Array.from(
-          allCandidates.values()
-        );
-
-      selectionMode =
-        "all-matching-fallback";
-    }
+    const ctCandidates =
+      ctData.candidates;
 
 
-    /* =====================================================
-     * SORT
-     * ===================================================== */
+    /* ---------------------------------------------
+     * HARD RDAP REGISTRATION GATE
+     * ------------------------------------------- */
 
-    selected.sort(
-      (a, b) => {
-        const aTime =
-          a.discoveredAt
-            ? new Date(
-                a.discoveredAt
-              ).getTime()
-            : 0;
+    const verifiedRecords =
+      await runWithConcurrency(
+        ctCandidates,
+        RDAP_CONCURRENCY,
+        async candidate => {
+          const verification =
+            await verifyRegistration(
+              candidate.domain
+            );
 
-        const bTime =
-          b.discoveredAt
-            ? new Date(
-                b.discoveredAt
-              ).getTime()
-            : 0;
+          /*
+           * NO registration date:
+           * reject completely.
+           */
 
-        return (
-          bTime -
-          aTime
-        );
-      }
-    );
+          if (
+            !verification.verified ||
+            !verification.registeredAt
+          ) {
+            return {
+              ...candidate,
 
+              registeredAt:
+                null,
 
-    /*
-     * Discovery safety limit.
-     *
-     * This does NOT limit Gemini.
-     */
-    const domains =
-      selected.slice(
-        0,
-        MAX_RESULTS
+              registrationVerified:
+                false,
+
+              registrationInWindow:
+                false,
+
+              registrationError:
+                verification.error ||
+                "Registration date not verified"
+            };
+          }
+
+          const registrationTime =
+            new Date(
+              verification.registeredAt
+            ).getTime();
+
+          const insideWindow =
+            registrationTime >=
+              cutoff &&
+            registrationTime <=
+              Date.now() +
+                FUTURE_TOLERANCE_MS;
+
+          /*
+           * Registration verified but old:
+           * reject.
+           */
+
+          if (!insideWindow) {
+            return {
+              ...candidate,
+
+              registeredAt:
+                verification.registeredAt,
+
+              registrationVerified:
+                true,
+
+              registrationInWindow:
+                false,
+
+              registrationSource:
+                "RDAP",
+
+              registrationError:
+                "Verified registration date is outside selected period"
+            };
+          }
+
+          /*
+           * FINAL VERIFIED NEW REGISTRATION
+           */
+
+          return {
+            ...candidate,
+
+            registeredAt:
+              verification.registeredAt,
+
+            registrationVerified:
+              true,
+
+            registrationInWindow:
+              true,
+
+            registrationSource:
+              "RDAP",
+
+            registrationError:
+              null
+          };
+        }
       );
 
 
-    const successfulSources =
-      sourceStatus.filter(
+    /* ---------------------------------------------
+     * ONLY VERIFIED NEW REGISTRATIONS CONTINUE
+     * ------------------------------------------- */
+
+    const domains =
+      verifiedRecords.filter(
         item =>
-          item.queryWorked
+          item.registrationVerified ===
+            true &&
+          item.registrationInWindow ===
+            true
+      );
+
+
+    const verificationFailed =
+      verifiedRecords.filter(
+        item =>
+          item.registrationVerified !==
+          true
       ).length;
 
-    const failedSources =
-      sourceStatus.filter(
+
+    const outsideWindow =
+      verifiedRecords.filter(
         item =>
-          !item.queryWorked
+          item.registrationVerified ===
+            true &&
+          item.registrationInWindow ===
+            false
       ).length;
 
 
-    /* =====================================================
-     * BOTH SOURCES FAILED
-     * ===================================================== */
-
-    if (
-      successfulSources === 0
-    ) {
-      return res
-        .status(502)
-        .json({
-          ok: false,
-
-          error:
-            "All domain discovery sources failed.",
-
-          message:
-            "Neither crt.sh nor ctlogs.dev returned usable data.",
-
-          sourceStatus
-        });
-    }
+    const registrationRejected =
+      verifiedRecords.length -
+      domains.length;
 
 
-    /* =====================================================
-     * SUCCESS
-     * ===================================================== */
+    /* ---------------------------------------------
+     * RESPONSE
+     * ------------------------------------------- */
 
-    return res
-      .status(200)
-      .json({
-        ok: true,
+    return res.status(200).json({
+      ok: true,
 
-        periodHours,
+      tld,
 
-        tlds,
+      periodHours,
 
-        scannedAt:
-          new Date(
-            now
-          ).toISOString(),
+      domains,
 
-        cutoffTime:
-          new Date(
-            cutoffTime
-          ).toISOString(),
-
-        count:
-          domains.length,
-
+      candidates:
         domains,
 
-        statistics: {
-          allMatchingDomains:
-            allCandidates.size,
+      discovered:
+        ctCandidates.length,
 
-          recentMatchingDomains:
-            recentCandidates.size,
+      registrationVerified:
+        domains.length,
 
-          returnedDomains:
-            domains.length
+      registrationRejected,
+
+      verificationFailed,
+
+      outsideWindow,
+
+      sourceStatus: {
+        crtSh: {
+          ok: true,
+          rows: rows.length
         },
 
-        sourceSummary: {
-          totalSources:
-            sourceStatus.length,
+        registration: {
+          source: "RDAP",
+          required: true
+        }
+      },
 
-          successfulSources,
+      statistics: {
+        ctRows:
+          rows.length,
 
-          failedSources
-        },
+        ctRowsWithNames:
+          ctData.rowsWithNames,
 
-        selectionMode,
+        ctRowsWithDates:
+          ctData.rowsWithDates,
 
-        sourceStatus,
+        ctCandidates:
+          ctCandidates.length,
 
-        note:
-          "Domains are discovered from Certificate Transparency data. CT discovery is not verified domain registration."
-      });
+        verifiedNewRegistrations:
+          domains.length,
+
+        rejectedByRegistrationGate:
+          registrationRejected,
+
+        verificationFailed,
+
+        outsideWindow,
+
+        elapsedMs:
+          Date.now() - started
+      }
+    });
 
   } catch (error) {
     console.error(
-      "LD76 DISCOVERY ERROR:",
+      "LD76 discovery error:",
       error
     );
 
-    return res
-      .status(500)
-      .json({
-        ok: false,
+    return res.status(500).json({
+      ok: false,
 
-        error:
-          "Domain discovery failed.",
+      stage:
+        "discovery",
 
-        message:
-          error?.message ||
-          "Unknown server error."
-      });
+      error:
+        error?.message ||
+        "Discovery failed"
+    });
   }
-            }
+}
