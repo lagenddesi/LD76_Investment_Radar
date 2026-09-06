@@ -41,13 +41,13 @@ function normalizePeriod(body) {
 }
 
 function normalizeDomain(value) {
-  if (typeof value !== "string") {
-    return null;
-  }
+  if (typeof value !== "string") return null;
 
   let domain = value.trim().toLowerCase();
 
-  domain = domain.replace(/^\*\./, "");
+  domain = domain.replace(/^\*\.\s*/, "");
+  domain = domain.replace(/^https?:\/\//, "");
+  domain = domain.split("/")[0];
   domain = domain.replace(/\.$/, "");
 
   if (!domain) return null;
@@ -55,7 +55,6 @@ function normalizeDomain(value) {
   if (
     domain.length > 253 ||
     domain.includes(" ") ||
-    domain.includes("/") ||
     domain.includes("\\")
   ) {
     return null;
@@ -89,10 +88,10 @@ function getNames(row) {
 
 function getCertificateDate(row) {
   const fields = [
-    row?.not_before,
     row?.entry_timestamp,
     row?.min_entry_timestamp,
-    row?.entry_time
+    row?.entry_time,
+    row?.not_before
   ];
 
   for (const value of fields) {
@@ -121,7 +120,7 @@ async function fetchJson(url) {
       headers: {
         Accept: "application/json",
         "User-Agent":
-          "LD76-Investment-Radar/1.0"
+          "Mozilla/5.0 LD76-Investment-Radar/1.0"
       },
       signal: controller.signal
     });
@@ -130,13 +129,13 @@ async function fetchJson(url) {
 
     if (!response.ok) {
       throw new Error(
-        `crt.sh returned HTTP ${response.status}`
+        `HTTP ${response.status}`
       );
     }
 
     if (!text.trim()) {
       throw new Error(
-        "crt.sh returned an empty response"
+        "Empty response"
       );
     }
 
@@ -146,13 +145,13 @@ async function fetchJson(url) {
       data = JSON.parse(text);
     } catch {
       throw new Error(
-        "crt.sh returned invalid JSON"
+        "Invalid JSON response"
       );
     }
 
     if (!Array.isArray(data)) {
       throw new Error(
-        "crt.sh response was not an array"
+        "Response is not an array"
       );
     }
 
@@ -163,24 +162,26 @@ async function fetchJson(url) {
 }
 
 /*
- * crt.sh search pattern:
+ * IMPORTANT:
  *
- * %.top
+ * For ".top":
  *
- * encodeURIComponent() converts this to:
+ * wildcard = %.top
  *
+ * encodeURIComponent("%.top")
+ * becomes:
  * %25.top
  *
- * We must NOT encode the % twice.
+ * This is the correct crt.sh query.
  */
-
 async function queryCrtSh(tld) {
   const pattern = `%${tld}`;
 
+  const encodedPattern =
+    encodeURIComponent(pattern);
+
   const url =
-    "https://crt.sh/?q=" +
-    encodeURIComponent(pattern) +
-    "&output=json";
+    `https://crt.sh/?q=${encodedPattern}&output=json`;
 
   const started = Date.now();
 
@@ -191,7 +192,8 @@ async function queryCrtSh(tld) {
       ok: true,
       rows,
       url,
-      durationMs: Date.now() - started,
+      durationMs:
+        Date.now() - started,
       error: null
     };
   } catch (error) {
@@ -199,7 +201,8 @@ async function queryCrtSh(tld) {
       ok: false,
       rows: [],
       url,
-      durationMs: Date.now() - started,
+      durationMs:
+        Date.now() - started,
       error:
         error?.message ||
         "Unknown crt.sh error"
@@ -219,7 +222,10 @@ function extractDomains(
   let rowsWithDates = 0;
 
   for (const row of rows) {
-    if (!row || typeof row !== "object") {
+    if (
+      !row ||
+      typeof row !== "object"
+    ) {
       continue;
     }
 
@@ -237,7 +243,8 @@ function extractDomains(
     }
 
     for (const rawName of names) {
-      const domain = normalizeDomain(rawName);
+      const domain =
+        normalizeDomain(rawName);
 
       if (!domain) continue;
 
@@ -246,20 +253,15 @@ function extractDomains(
       }
 
       const discoveredAt =
-        certificateDate?.toISOString() ||
-        null;
+        certificateDate
+          ? certificateDate.toISOString()
+          : null;
 
       const record = {
         domain,
 
         discoveredAt,
 
-        /*
-         * This is NOT proof of registration.
-         *
-         * It is certificate-transparency
-         * observation evidence.
-         */
         registeredAt: null,
 
         registrationVerified: false,
@@ -270,41 +272,58 @@ function extractDomains(
           "certificate-transparency"
       };
 
-      const existing = all.get(domain);
+      const existing =
+        all.get(domain);
 
+      /*
+       * Keep the newest observation.
+       */
       if (
         !existing ||
         (
           discoveredAt &&
-          existing.discoveredAt &&
-          new Date(discoveredAt).getTime() >
+          (
+            !existing.discoveredAt ||
+            new Date(
+              discoveredAt
+            ).getTime() >
             new Date(
               existing.discoveredAt
             ).getTime()
+          )
         )
       ) {
-        all.set(domain, record);
+        all.set(
+          domain,
+          record
+        );
       }
 
       /*
-       * Recent CT evidence.
-       *
-       * We keep this separate from the
-       * complete candidate list.
+       * Recent CT observation.
        */
       if (
         certificateDate &&
-        certificateDate.getTime() >= cutoffTime
+        certificateDate.getTime() >=
+          cutoffTime
       ) {
         const existingRecent =
           recent.get(domain);
 
         if (
           !existingRecent ||
-          new Date(discoveredAt).getTime() >
-            new Date(
-              existingRecent.discoveredAt
-            ).getTime()
+          (
+            discoveredAt &&
+            (
+              !existingRecent.discoveredAt ||
+              new Date(
+                discoveredAt
+              ).getTime() >
+              new Date(
+                existingRecent.discoveredAt
+              ).getTime()
+            )
+          )
         ) {
           recent.set(
             domain,
@@ -336,16 +355,22 @@ export default async function handler(
   }
 
   try {
-    const body = req.body || {};
+    const body =
+      req.body || {};
 
     let requestedTlds = [];
 
-    if (Array.isArray(body.tlds)) {
-      requestedTlds = body.tlds;
+    if (
+      Array.isArray(body.tlds)
+    ) {
+      requestedTlds =
+        body.tlds;
     } else if (
       typeof body.tld === "string"
     ) {
-      requestedTlds = [body.tld];
+      requestedTlds = [
+        body.tld
+      ];
     }
 
     const tlds = [
@@ -367,7 +392,8 @@ export default async function handler(
     const periodHours =
       normalizePeriod(body);
 
-    const now = Date.now();
+    const now =
+      Date.now();
 
     const cutoffTime =
       now -
@@ -384,6 +410,9 @@ export default async function handler(
 
     const sourceStatus = [];
 
+    /*
+     * Query every selected TLD.
+     */
     for (const tld of tlds) {
       const result =
         await queryCrtSh(tld);
@@ -396,31 +425,29 @@ export default async function handler(
         );
 
       for (
-        const [domain, record]
+        const [
+          domain,
+          record
+        ]
         of extracted.all
       ) {
-        if (
-          !allCandidates.has(domain)
-        ) {
-          allCandidates.set(
-            domain,
-            record
-          );
-        }
+        allCandidates.set(
+          domain,
+          record
+        );
       }
 
       for (
-        const [domain, record]
+        const [
+          domain,
+          record
+        ]
         of extracted.recent
       ) {
-        if (
-          !recentCandidates.has(domain)
-        ) {
-          recentCandidates.set(
-            domain,
-            record
-          );
-        }
+        recentCandidates.set(
+          domain,
+          record
+        );
       }
 
       sourceStatus.push({
@@ -455,19 +482,21 @@ export default async function handler(
     }
 
     /*
-     * Primary list:
+     * IMPORTANT:
      *
-     * Prefer domains having recent CT
-     * evidence.
+     * If recent filtering produces 0,
+     * DO NOT return 0 domains.
      *
-     * If CT timestamps are unavailable,
-     * keep matching candidates instead
-     * of incorrectly reporting zero.
+     * Use all matching CT domains.
+     *
+     * This protects the scanner from
+     * missing/old CT timestamps.
      */
-
     let selected;
 
-    if (recentCandidates.size > 0) {
+    if (
+      recentCandidates.size > 0
+    ) {
       selected =
         Array.from(
           recentCandidates.values()
@@ -479,23 +508,28 @@ export default async function handler(
         );
     }
 
-    selected.sort((a, b) => {
-      const aTime =
-        a.discoveredAt
-          ? new Date(
-              a.discoveredAt
-            ).getTime()
-          : 0;
+    /*
+     * Sort newest first.
+     */
+    selected.sort(
+      (a, b) => {
+        const aTime =
+          a.discoveredAt
+            ? new Date(
+                a.discoveredAt
+              ).getTime()
+            : 0;
 
-      const bTime =
-        b.discoveredAt
-          ? new Date(
-              b.discoveredAt
-            ).getTime()
-          : 0;
+        const bTime =
+          b.discoveredAt
+            ? new Date(
+                b.discoveredAt
+              ).getTime()
+            : 0;
 
-      return bTime - aTime;
-    });
+        return bTime - aTime;
+      }
+    );
 
     const domains =
       selected.slice(
@@ -505,13 +539,36 @@ export default async function handler(
 
     const successfulSources =
       sourceStatus.filter(
-        item => item.queryWorked
+        item =>
+          item.queryWorked
       ).length;
 
     const failedSources =
       sourceStatus.filter(
-        item => !item.queryWorked
+        item =>
+          !item.queryWorked
       ).length;
+
+    /*
+     * Never silently report 0 when
+     * the source itself failed.
+     */
+    if (
+      domains.length === 0 &&
+      failedSources > 0
+    ) {
+      return res.status(502).json({
+        ok: false,
+
+        error:
+          "Domain discovery source failed.",
+
+        message:
+          "crt.sh did not return usable domain data.",
+
+        sourceStatus
+      });
+    }
 
     return res.status(200).json({
       ok: true,
@@ -558,7 +615,7 @@ export default async function handler(
       sourceStatus,
 
       note:
-        "Recent CT evidence indicates recent certificate-transparency observation, not guaranteed domain registration."
+        "Certificate-transparency discovery is not the same as verified domain registration."
     });
   } catch (error) {
     console.error(
