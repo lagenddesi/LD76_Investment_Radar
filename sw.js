@@ -1,4 +1,4 @@
-const CACHE_NAME = "ld76-investment-radar-v1";
+const CACHE_NAME = "ld76-investment-radar-v2";
 
 const APP_SHELL = [
   "/",
@@ -41,39 +41,29 @@ self.addEventListener("fetch", event => {
 
   const url = new URL(request.url);
 
-  /*
-   * API responses are intentionally NOT cached.
-   * Scanning and Gemini requests must always reach
-   * the live server.
-   */
   if (url.pathname.startsWith("/api/")) {
     return;
   }
 
   event.respondWith(
-    caches.match(request).then(cachedResponse => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      return fetch(request).then(networkResponse => {
+    fetch(request)
+      .then(networkResponse => {
         if (
-          !networkResponse ||
-          networkResponse.status !== 200 ||
-          networkResponse.type !== "basic"
+          networkResponse &&
+          networkResponse.status === 200 &&
+          networkResponse.type === "basic"
         ) {
-          return networkResponse;
+          const responseClone = networkResponse.clone();
+
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(request, responseClone);
+          });
         }
 
-        const responseClone =
-          networkResponse.clone();
-
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(request, responseClone);
-        });
-
         return networkResponse;
-      });
-    })
+      })
+      .catch(() => {
+        return caches.match(request);
+      })
   );
 });
