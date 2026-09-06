@@ -4,21 +4,21 @@
  * LD76 INVESTMENT RADAR
  * Main frontend controller
  *
- * IMPORTANT AI RULE:
- * A domain is considered previously analyzed ONLY when:
+ * RULE:
+ * A domain is "already analyzed" ONLY when:
  *   aiAnalyzed === true
- *   AND a valid aiScore 0-100 exists.
+ *   AND aiScore is a valid 0-100 number.
  *
- * Failed Gemini requests are NOT marked as analyzed.
+ * Failed / missing Gemini analysis is NEVER treated as analyzed.
  *
  * IMPORTANT:
  * There is NO arbitrary 4/5 candidate limit.
- * All fresh candidates are sent to Gemini in one request.
+ * All fresh candidates are sent to /api/analyze.
  */
 
 
 /* =========================================================
-   APP STATE
+   STATE
 ========================================================= */
 
 const state = {
@@ -49,12 +49,14 @@ const state = {
 
   geminiRequests: 0,
 
+  currentView: "home",
+
   lastError: null
 };
 
 
 /* =========================================================
-   INDEXED DB
+   INDEXEDDB
 ========================================================= */
 
 const DB_NAME = "LD76_Investment_Radar";
@@ -200,7 +202,7 @@ async function getAllDomains() {
 
 
 /* =========================================================
-   UI HELPERS
+   DOM HELPERS
 ========================================================= */
 
 function $(selector) {
@@ -301,6 +303,10 @@ function setProgressPercent(percent) {
 }
 
 
+/* =========================================================
+   PROGRESS
+========================================================= */
+
 function updateProgressText() {
   setProgress(
     `Discovered ${state.discoveredCount} → ` +
@@ -354,7 +360,12 @@ async function discoverDomains() {
           state.selectedTld,
 
         period:
-          state.selectedPeriod
+          state.selectedPeriod,
+
+        periodHours:
+          state.selectedPeriod === "48h"
+            ? 48
+            : 24
       })
     }
   );
@@ -382,11 +393,14 @@ async function discoverDomains() {
 
 
 /* =========================================================
-   SCANNER
+   WEBSITE SCANNER
 ========================================================= */
 
 async function scanDomains(domains) {
-  if (!Array.isArray(domains) || !domains.length) {
+  if (
+    !Array.isArray(domains) ||
+    !domains.length
+  ) {
     return {
       candidates: [],
       scanned: 0,
@@ -434,13 +448,8 @@ async function scanDomains(domains) {
   }
 
   state.scannedCount =
-    Number(data.scanned || 0);
-
-  state.relevantCount =
     Number(
-      data.paymentMatches ??
-      data.investmentMatches ??
-      0
+      data.scanned || 0
     );
 
   return data;
@@ -448,8 +457,28 @@ async function scanDomains(domains) {
 
 
 /* =========================================================
-   ANALYZED FILTER
+   ALREADY ANALYZED FILTER
 ========================================================= */
+
+function hasValidSavedGeminiAnalysis(record) {
+  if (!record) {
+    return false;
+  }
+
+  if (record.aiAnalyzed !== true) {
+    return false;
+  }
+
+  const score =
+    Number(record.aiScore);
+
+  return (
+    Number.isFinite(score) &&
+    score >= 0 &&
+    score <= 100
+  );
+}
+
 
 async function filterAlreadyAnalyzed(candidates) {
   const fresh = [];
@@ -469,18 +498,11 @@ async function filterAlreadyAnalyzed(candidates) {
     const existing =
       await getDomain(domain);
 
-    const validSavedAnalysis =
-      Boolean(
-        existing &&
-        existing.aiAnalyzed === true &&
-        Number.isFinite(
-          Number(existing.aiScore)
-        ) &&
-        Number(existing.aiScore) >= 0 &&
-        Number(existing.aiScore) <= 100
-      );
-
-    if (validSavedAnalysis) {
+    if (
+      hasValidSavedGeminiAnalysis(
+        existing
+      )
+    ) {
       alreadyAnalyzed++;
       continue;
     }
@@ -500,14 +522,15 @@ async function filterAlreadyAnalyzed(candidates) {
 
 
 /* =========================================================
-   GEMINI ANALYSIS
+   GEMINI
 ========================================================= */
 
 async function analyzeWithGemini(candidates) {
   if (!state.geminiEnabled) {
     return {
       skipped: true,
-      results: []
+      results: [],
+      requestCount: 0
     };
   }
 
@@ -517,20 +540,21 @@ async function analyzeWithGemini(candidates) {
   ) {
     return {
       skipped: false,
-      results: []
+      results: [],
+      requestCount: 0
     };
   }
 
   /*
-   * NO 4/5 SITE LIMIT.
+   * NO candidate limit here.
    *
-   * Every fresh candidate is included.
+   * Every fresh candidate is sent.
+   * /api/analyze handles batching if required.
    */
 
   const payloadCandidates =
     candidates.map(
-      candidate =>
-        compactCandidate(candidate)
+      compactCandidate
     );
 
   setStatus(
@@ -569,12 +593,6 @@ async function analyzeWithGemini(candidates) {
     );
   }
 
-  /*
-   * A response was received from /api/analyze.
-   */
-
-  state.geminiRequests++;
-
   let data = null;
 
   try {
@@ -601,26 +619,39 @@ async function analyzeWithGemini(candidates) {
     );
   }
 
+  /*
+   * IMPORTANT:
+   * Use backend's real requestCount.
+   *
+   * Backend may split a large request into
+   * multiple batches.
+   */
+
+  state.geminiRequests =
+    Number(
+      data.requestCount || 0
+    );
+
   const results =
     normalizeGeminiResults(data);
-
-  if (!results.length) {
-    throw new Error(
-      "Gemini returned no valid analysis results"
-    );
-  }
 
   return {
     skipped: false,
     results,
-    returnedCount:
-      results.length
+
+    requestCount:
+      state.geminiRequests,
+
+    rawResultCount:
+      Array.isArray(data.results)
+        ? data.results.length
+        : 0
   };
 }
 
 
 /* =========================================================
-   COMPACT GEMINI CANDIDATE
+   COMPACT CANDIDATE
 ========================================================= */
 
 function compactCandidate(candidate) {
@@ -669,7 +700,9 @@ function compactCandidate(candidate) {
       null,
 
     https:
-      Boolean(candidate?.https),
+      Boolean(
+        candidate?.https
+      ),
 
     pagesChecked:
       Array.isArray(
@@ -759,26 +792,58 @@ function normalizeGeminiResults(data) {
       continue;
     }
 
+    /*
+     * BACKEND FIELD:
+     * scamScore
+     *
+     * Also accept older frontend names
+     * for compatibility.
+     */
+
+    const rawScore =
+      item.scamScore ??
+      item.aiScore ??
+      item.score ??
+      item.geminiScamScore;
+
     const score =
-      Number(
-        item.aiScore ??
-        item.score ??
-        item.scamScore ??
-        item.geminiScamScore
-      );
+      Number(rawScore);
+
+    /*
+     * A null score means Gemini did not
+     * successfully analyze this candidate.
+     */
 
     if (
       !Number.isFinite(score) ||
       score < 0 ||
       score > 100
     ) {
+      console.warn(
+        "Ignoring Gemini result without valid scamScore:",
+        domain,
+        item
+      );
+
       continue;
     }
 
     results.push({
       domain,
 
+      websiteName:
+        item.websiteName ||
+        item.title ||
+        "",
+
+      classification:
+        item.classification ||
+        "",
+
       aiScore:
+        Math.round(score),
+
+      geminiScamScore:
         Math.round(score),
 
       confidence:
@@ -787,8 +852,8 @@ function normalizeGeminiResults(data) {
         ),
 
       analysis:
-        item.analysis ||
         item.summary ||
+        item.analysis ||
         item.reasoning ||
         "",
 
@@ -796,6 +861,30 @@ function normalizeGeminiResults(data) {
         normalizeStringArray(
           item.redFlags ||
           item.red_flags
+        ),
+
+      positiveSignals:
+        normalizeStringArray(
+          item.positiveSignals ||
+          item.positive_signals
+        ),
+
+      missingInformation:
+        normalizeStringArray(
+          item.missingInformation ||
+          item.missing_information
+        ),
+
+      investmentClaims:
+        normalizeStringArray(
+          item.investmentClaims ||
+          item.investment_claims
+        ),
+
+      paymentMethods:
+        normalizeStringArray(
+          item.paymentMethods ||
+          item.payment_methods
         ),
 
       evidence:
@@ -825,7 +914,8 @@ async function saveAnalysisResults(
   geminiResults
 ) {
   if (
-    !Array.isArray(geminiResults)
+    !Array.isArray(geminiResults) ||
+    !geminiResults.length
   ) {
     return 0;
   }
@@ -858,7 +948,7 @@ async function saveAnalysisResults(
       !submittedDomains.has(domain)
     ) {
       console.warn(
-        "Ignoring Gemini result for domain not submitted:",
+        "Ignoring Gemini result for unsubmitted domain:",
         domain
       );
 
@@ -893,7 +983,10 @@ async function saveAnalysisResults(
       Math.round(score);
 
     /*
-     * First save complete result with aiAnalyzed false.
+     * Save complete Gemini analysis.
+     *
+     * aiAnalyzed remains false until
+     * the saved record has been verified.
      */
 
     const record = {
@@ -902,11 +995,21 @@ async function saveAnalysisResults(
 
       domain,
 
+      websiteName:
+        analysis.websiteName ||
+        candidate?.websiteName ||
+        candidate?.title ||
+        "",
+
       aiScore:
         finalScore,
 
       geminiScamScore:
         finalScore,
+
+      aiClassification:
+        analysis.classification ||
+        "",
 
       confidence:
         analysis.confidence ||
@@ -918,6 +1021,22 @@ async function saveAnalysisResults(
 
       aiRedFlags:
         analysis.redFlags ||
+        [],
+
+      aiPositiveSignals:
+        analysis.positiveSignals ||
+        [],
+
+      aiMissingInformation:
+        analysis.missingInformation ||
+        [],
+
+      aiInvestmentClaims:
+        analysis.investmentClaims ||
+        [],
+
+      aiPaymentMethods:
+        analysis.paymentMethods ||
         [],
 
       aiEvidence:
@@ -951,7 +1070,7 @@ async function saveAnalysisResults(
     }
 
     /*
-     * Verify score was actually saved.
+     * Verify score was really stored.
      */
 
     let verified = null;
@@ -959,21 +1078,24 @@ async function saveAnalysisResults(
     try {
       verified =
         await getDomain(domain);
-    } catch {
-      verified = null;
-    }
-
-    const saveSucceeded =
-      Boolean(
-        verified &&
-        Number(
-          verified.aiScore
-        ) === finalScore
+    } catch (error) {
+      console.error(
+        "Could not verify Gemini save:",
+        domain,
+        error
       );
 
-    if (!saveSucceeded) {
+      continue;
+    }
+
+    if (
+      !verified ||
+      Number(
+        verified.aiScore
+      ) !== finalScore
+    ) {
       console.error(
-        "Gemini result could not be verified:",
+        "Gemini result save verification failed:",
         domain
       );
 
@@ -981,14 +1103,14 @@ async function saveAnalysisResults(
     }
 
     /*
-     * ONLY after successful verification:
-     * mark aiAnalyzed true.
+     * ONLY NOW mark as analyzed.
      */
 
     const analyzedRecord = {
       ...verified,
 
-      aiAnalyzed: true
+      aiAnalyzed:
+        true
     };
 
     try {
@@ -997,7 +1119,7 @@ async function saveAnalysisResults(
       );
     } catch (error) {
       console.error(
-        "Failed setting aiAnalyzed=true:",
+        "Failed marking domain as analyzed:",
         domain,
         error
       );
@@ -1082,15 +1204,16 @@ async function startScan() {
 
   try {
     /*
-     * STEP 1: DISCOVERY
+     * STEP 1
+     * DISCOVERY
      */
 
     setStatus(
-      "Discovering domains..."
+      `Discovering new ${state.selectedTld} domains (${state.selectedPeriod.toUpperCase()})...`
     );
 
     setProgress(
-      "Starting discovery..."
+      `Starting ${state.selectedPeriod.toUpperCase()} discovery...`
     );
 
     const discovery =
@@ -1130,7 +1253,8 @@ async function startScan() {
     }
 
     /*
-     * STEP 2: SCAN
+     * STEP 2
+     * WEBSITE SCAN
      */
 
     setStatus(
@@ -1138,7 +1262,7 @@ async function startScan() {
     );
 
     setProgress(
-      `Scanning ${state.domains.length} discovered domains...`
+      `Scanning all ${state.domains.length} discovered domains...`
     );
 
     const scan =
@@ -1153,17 +1277,20 @@ async function startScan() {
         ? scan.candidates
         : [];
 
+    /*
+     * IMPORTANT:
+     * Relevant count = actual final candidates,
+     * not raw paymentMatches.
+     */
+
     state.relevantCount =
-      Number(
-        scan.paymentMatches ??
-        state.candidates.length
-      );
+      state.candidates.length;
 
     setProgressPercent(55);
 
     /*
-     * STEP 3:
-     * Remove ONLY successfully analyzed domains.
+     * STEP 3
+     * REMOVE ONLY SUCCESSFULLY ANALYZED DOMAINS
      */
 
     setStatus(
@@ -1180,27 +1307,17 @@ async function startScan() {
 
     updateProgressText();
 
-    if (!state.geminiEnabled) {
-      setProgressPercent(100);
-
-      setStatus(
-        "Gemini is OFF."
-      );
-
-      renderResults();
-
-      return;
-    }
-
     /*
-     * No fresh candidates.
+     * Nothing new for Gemini.
      */
 
     if (!candidatesForAi.length) {
       setProgressPercent(100);
 
       setStatus(
-        "No new candidates require Gemini analysis."
+        state.candidates.length
+          ? "All matching candidates were already successfully analyzed by Gemini."
+          : "No investment/payment candidates were found."
       );
 
       renderResults();
@@ -1209,14 +1326,12 @@ async function startScan() {
     }
 
     /*
-     * STEP 4: GEMINI
-     *
-     * ALL fresh candidates.
-     * No arbitrary limit.
+     * STEP 4
+     * GEMINI
      */
 
     setStatus(
-      `Sending ${candidatesForAi.length} candidate(s) to Gemini...`
+      `Sending ALL ${candidatesForAi.length} fresh candidate(s) to Gemini...`
     );
 
     setProgressPercent(70);
@@ -1227,7 +1342,21 @@ async function startScan() {
       );
 
     /*
-     * STEP 5: SAVE
+     * Gemini can return fewer valid
+     * results than candidates.
+     */
+
+    if (
+      !aiResponse.results.length
+    ) {
+      throw new Error(
+        `Gemini returned no valid scored results for ${candidatesForAi.length} candidate(s).`
+      );
+    }
+
+    /*
+     * STEP 5
+     * SAVE
      */
 
     setStatus(
@@ -1251,11 +1380,11 @@ async function startScan() {
 
     if (saved > 0) {
       setStatus(
-        `Gemini analysis saved for ${saved} domain(s).`
+        `Gemini analysis successfully saved for ${saved} domain(s).`
       );
     } else {
       setStatus(
-        "Gemini returned results, but none were successfully saved."
+        "Gemini returned scored results, but none could be verified in local history."
       );
     }
 
@@ -1310,10 +1439,6 @@ function renderResults() {
     return;
   }
 
-  /*
-   * Newest first.
-   */
-
   const sorted =
     [...state.results].sort(
       (a, b) =>
@@ -1357,10 +1482,32 @@ function createResultCard(result) {
       ? result.aiRedFlags
       : [];
 
+  const positiveSignals =
+    Array.isArray(
+      result.aiPositiveSignals
+    )
+      ? result.aiPositiveSignals
+      : [];
+
+  const missingInformation =
+    Array.isArray(
+      result.aiMissingInformation
+    )
+      ? result.aiMissingInformation
+      : [];
+
+  const paymentMethods =
+    Array.isArray(
+      result.aiPaymentMethods
+    )
+      ? result.aiPaymentMethods
+      : [];
+
   card.innerHTML = `
     <div class="result-header">
 
       <div>
+
         <div class="result-label">
           🚨 GEMINI SCAM SCORE
         </div>
@@ -1378,6 +1525,7 @@ function createResultCard(result) {
             scamBand(safeScore)
           )}
         </div>
+
       </div>
 
       <div class="result-confidence">
@@ -1392,19 +1540,31 @@ function createResultCard(result) {
 
     <div class="result-domain">
       ${escapeHtml(
-        result.domain ||
-        ""
+        result.domain || ""
       )}
     </div>
 
     ${
-      result.title ||
-      result.websiteName
+      result.websiteName ||
+      result.title
         ? `
           <div class="result-title">
             ${escapeHtml(
               result.websiteName ||
-              result.title
+              result.title ||
+              ""
+            )}
+          </div>
+        `
+        : ""
+    }
+
+    ${
+      result.aiClassification
+        ? `
+          <div class="result-classification">
+            ${escapeHtml(
+              result.aiClassification
             )}
           </div>
         `
@@ -1414,7 +1574,7 @@ function createResultCard(result) {
     <div class="result-analysis">
       ${escapeHtml(
         result.aiAnalysis ||
-        "No analysis text returned."
+        "No analysis summary returned."
       )}
     </div>
 
@@ -1428,12 +1588,71 @@ function createResultCard(result) {
               ${redFlags
                 .map(
                   flag =>
-                    `<li>${escapeHtml(
-                      flag
-                    )}</li>`
+                    `<li>${escapeHtml(flag)}</li>`
                 )
                 .join("")}
             </ul>
+
+          </div>
+        `
+        : ""
+    }
+
+    ${
+      positiveSignals.length
+        ? `
+          <div class="result-positive">
+            <strong>Positive Signals</strong>
+
+            <ul>
+              ${positiveSignals
+                .map(
+                  item =>
+                    `<li>${escapeHtml(item)}</li>`
+                )
+                .join("")}
+            </ul>
+
+          </div>
+        `
+        : ""
+    }
+
+    ${
+      missingInformation.length
+        ? `
+          <div class="result-missing">
+            <strong>Missing Information</strong>
+
+            <ul>
+              ${missingInformation
+                .map(
+                  item =>
+                    `<li>${escapeHtml(item)}</li>`
+                )
+                .join("")}
+            </ul>
+
+          </div>
+        `
+        : ""
+    }
+
+    ${
+      paymentMethods.length
+        ? `
+          <div class="result-payments">
+            <strong>Payment Methods</strong>
+
+            <div>
+              ${paymentMethods
+                .map(
+                  item =>
+                    `<span>${escapeHtml(item)}</span>`
+                )
+                .join(", ")}
+            </div>
+
           </div>
         `
         : ""
@@ -1444,11 +1663,13 @@ function createResultCard(result) {
         ? `
           <div class="result-recommendation">
             <strong>Recommendation</strong>
+
             <div>
               ${escapeHtml(
                 result.aiRecommendation
               )}
             </div>
+
           </div>
         `
         : ""
@@ -1492,13 +1713,7 @@ async function loadHistory() {
     state.results =
       records
         .filter(
-          record =>
-            record?.aiAnalyzed === true &&
-            Number.isFinite(
-              Number(
-                record.aiScore
-              )
-            )
+          hasValidSavedGeminiAnalysis
         )
         .sort(
           (a, b) =>
@@ -1512,17 +1727,28 @@ async function loadHistory() {
 
     renderResults();
 
+    return state.results;
+
   } catch (error) {
     console.error(
       "History load failed:",
       error
     );
+
+    setStatus(
+      `History load failed: ${
+        error?.message ||
+        "Unknown error"
+      }`
+    );
+
+    return [];
   }
 }
 
 
 /* =========================================================
-   SETTINGS / SELECTIONS
+   PERIOD / TLD / PAYMENT SETTINGS
 ========================================================= */
 
 function readSelectedTld() {
@@ -1594,22 +1820,100 @@ function setupTldSelector() {
     return;
   }
 
-  state.selectedTld =
-    String(
-      select.value ||
-      ".top"
-    ).trim();
+  readSelectedTld();
 
   select.addEventListener(
     "change",
     () => {
-      state.selectedTld =
-        String(
-          select.value ||
-          ".top"
-        ).trim();
+      readSelectedTld();
+      updateSettingsView();
     }
   );
+}
+
+
+function updatePeriodIndicator() {
+  let indicator =
+    $("#periodSelectionIndicator");
+
+  const activeButton =
+    document.querySelector(
+      ".period-button.active"
+    );
+
+  if (!activeButton) {
+    return;
+  }
+
+  const period =
+    String(
+      activeButton.dataset.period ||
+      "24h"
+    );
+
+  /*
+   * Make active state visually obvious
+   * even if CSS does not have a dedicated
+   * .period-button.active rule.
+   */
+
+  const buttons =
+    $all(
+      ".period-button"
+    );
+
+  for (const button of buttons) {
+    const active =
+      button === activeButton;
+
+    button.setAttribute(
+      "aria-pressed",
+      active
+        ? "true"
+        : "false"
+    );
+
+    button.dataset.active =
+      active
+        ? "true"
+        : "false";
+
+    button.style.fontWeight =
+      active
+        ? "800"
+        : "500";
+
+    button.style.opacity =
+      active
+        ? "1"
+        : "0.65";
+  }
+
+  if (!indicator) {
+    indicator =
+      document.createElement(
+        "div"
+      );
+
+    indicator.id =
+      "periodSelectionIndicator";
+
+    indicator.style.marginTop =
+      "8px";
+
+    indicator.style.fontWeight =
+      "700";
+
+    indicator.style.fontSize =
+      "13px";
+
+    activeButton.parentElement?.after(
+      indicator
+    );
+  }
+
+  indicator.textContent =
+    `ACTIVE PERIOD: ${period.toUpperCase()}`;
 }
 
 
@@ -1621,6 +1925,32 @@ function setupPeriodButtons() {
 
   if (!buttons.length) {
     return;
+  }
+
+  let activeFound = false;
+
+  for (const button of buttons) {
+    if (
+      button.classList.contains(
+        "active"
+      )
+    ) {
+      activeFound = true;
+    }
+  }
+
+  if (!activeFound) {
+    const defaultButton =
+      buttons.find(
+        button =>
+          button.dataset.period ===
+          "24h"
+      ) ||
+      buttons[0];
+
+    defaultButton.classList.add(
+      "active"
+    );
   }
 
   for (const button of buttons) {
@@ -1643,11 +1973,15 @@ function setupPeriodButtons() {
             button.dataset.period ||
             "24h"
           );
+
+        updatePeriodIndicator();
+        updateSettingsView();
       }
     );
   }
 
   readSelectedPeriod();
+  updatePeriodIndicator();
 }
 
 
@@ -1663,7 +1997,10 @@ function setupPaymentMethods() {
   for (const checkbox of checkboxes) {
     checkbox.addEventListener(
       "change",
-      readPaymentMethods
+      () => {
+        readPaymentMethods();
+        updateSettingsView();
+      }
     );
   }
 
@@ -1672,8 +2009,296 @@ function setupPaymentMethods() {
 
 
 /* =========================================================
-   NAVIGATION
+   SETTINGS VIEW
 ========================================================= */
+
+function getSettingsPanel() {
+  let panel =
+    $("#ld76SettingsPanel");
+
+  if (panel) {
+    return panel;
+  }
+
+  panel =
+    document.createElement(
+      "section"
+    );
+
+  panel.id =
+    "ld76SettingsPanel";
+
+  panel.className =
+    "settings-section";
+
+  panel.style.display =
+    "none";
+
+  panel.innerHTML = `
+    <div class="section-header">
+
+      <div>
+        <h2>Settings</h2>
+
+        <p>
+          Configure discovery and payment filters.
+        </p>
+      </div>
+
+    </div>
+
+    <div
+      id="ld76SettingsContent"
+      class="settings-content"
+    ></div>
+
+    <button
+      id="ld76BackToScan"
+      class="primary-button"
+      type="button"
+    >
+      BACK TO SCAN
+    </button>
+  `;
+
+  const main =
+    document.querySelector(
+      "main"
+    );
+
+  if (main) {
+    main.appendChild(
+      panel
+    );
+  } else {
+    document.body.appendChild(
+      panel
+    );
+  }
+
+  const backButton =
+    $("#ld76BackToScan");
+
+  if (backButton) {
+    backButton.addEventListener(
+      "click",
+      () => {
+        showView("home");
+      }
+    );
+  }
+
+  return panel;
+}
+
+
+function updateSettingsView() {
+  const panel =
+    $("#ld76SettingsPanel");
+
+  if (!panel) {
+    return;
+  }
+
+  const content =
+    $("#ld76SettingsContent");
+
+  if (!content) {
+    return;
+  }
+
+  const paymentLabels = {
+    bank: "Bank Transfer / Bank",
+    easypaisa: "Easypaisa",
+    jazzcash: "JazzCash",
+    crypto: "Crypto"
+  };
+
+  const payments =
+    state.paymentMethods.length
+      ? state.paymentMethods
+          .map(
+            method =>
+              paymentLabels[method] ||
+              method
+          )
+          .join(", ")
+      : "None selected";
+
+  content.innerHTML = `
+    <div class="settings-item">
+      <strong>TLD</strong>
+      <div>${escapeHtml(
+        state.selectedTld
+      )}</div>
+    </div>
+
+    <div class="settings-item">
+      <strong>Discovery Period</strong>
+      <div>${escapeHtml(
+        state.selectedPeriod.toUpperCase()
+      )}</div>
+    </div>
+
+    <div class="settings-item">
+      <strong>Payment Filters</strong>
+      <div>${escapeHtml(
+        payments
+      )}</div>
+    </div>
+
+    <div class="settings-item">
+      <strong>Gemini</strong>
+      <div>
+        ${
+          state.geminiEnabled
+            ? "ENABLED"
+            : "DISABLED"
+        }
+      </div>
+    </div>
+
+    <div class="settings-item">
+      <strong>AI Rule</strong>
+      <div>
+        Only successfully saved Gemini scores
+        are excluded from future scans.
+      </div>
+    </div>
+  `;
+}
+
+
+/* =========================================================
+   VIEW NAVIGATION
+========================================================= */
+
+function setActiveNav(view) {
+  const navButtons =
+    $all(
+      ".nav-button"
+    );
+
+  for (const button of navButtons) {
+    const active =
+      button.dataset.view === view;
+
+    button.classList.toggle(
+      "active",
+      active
+    );
+
+    button.setAttribute(
+      "aria-current",
+      active
+        ? "page"
+        : "false"
+    );
+  }
+}
+
+
+async function showView(view) {
+  state.currentView =
+    view;
+
+  setActiveNav(view);
+
+  const settingsPanel =
+    getSettingsPanel();
+
+  const scanPanel =
+    document.querySelector(
+      ".scan-panel"
+    );
+
+  const progressSection =
+    $("#progressSection");
+
+  const resultsSection =
+    $("#resultsSection");
+
+  if (view === "settings") {
+    if (scanPanel) {
+      scanPanel.style.display =
+        "none";
+    }
+
+    if (progressSection) {
+      progressSection.style.display =
+        "none";
+    }
+
+    if (resultsSection) {
+      resultsSection.style.display =
+        "none";
+    }
+
+    settingsPanel.style.display =
+      "";
+
+    updateSettingsView();
+
+    return;
+  }
+
+  /*
+   * Hide settings for Home/History.
+   */
+
+  if (settingsPanel) {
+    settingsPanel.style.display =
+      "none";
+  }
+
+  if (view === "history") {
+    if (scanPanel) {
+      scanPanel.style.display =
+        "none";
+    }
+
+    if (progressSection) {
+      progressSection.style.display =
+        "none";
+    }
+
+    if (resultsSection) {
+      resultsSection.style.display =
+        "";
+    }
+
+    await loadHistory();
+
+    setText(
+      "#resultsTitle",
+      "History"
+    );
+
+    return;
+  }
+
+  /*
+   * HOME
+   */
+
+  if (scanPanel) {
+    scanPanel.style.display =
+      "";
+  }
+
+  if (resultsSection) {
+    resultsSection.style.display =
+      "";
+  }
+
+  setText(
+    "#resultsTitle",
+    "Results"
+  );
+
+  updatePeriodIndicator();
+}
+
 
 function setupNavigation() {
   const navButtons =
@@ -1684,52 +2309,19 @@ function setupNavigation() {
   for (const button of navButtons) {
     button.addEventListener(
       "click",
-      async () => {
+      async event => {
+        event.preventDefault();
 
-        for (const item of navButtons) {
-          item.classList.remove(
-            "active"
-          );
+        if (state.scanning) {
+          return;
         }
-
-        button.classList.add(
-          "active"
-        );
 
         const view =
-          button.dataset.view;
+          button.dataset.view ||
+          "home";
 
-        if (view === "history") {
-          await loadHistory();
-
-          showElement(
-            "#resultsSection",
-            true
-          );
-
-          return;
-        }
-
-        if (view === "settings") {
-          /*
-           * Settings is handled by the existing
-           * HTML/settings UI if present.
-           */
-          showElement(
-            "#settingsSection",
-            true
-          );
-
-          return;
-        }
-
-        /*
-         * HOME
-         */
-
-        showElement(
-          "#settingsSection",
-          false
+        await showView(
+          view
         );
       }
     );
@@ -1751,36 +2343,23 @@ function setupSettingsButton() {
 
   button.addEventListener(
     "click",
-    () => {
+    async event => {
+      event.preventDefault();
 
-      const settingsSection =
-        $("#settingsSection");
-
-      if (settingsSection) {
-        const currentlyVisible =
-          settingsSection.style.display !== "none";
-
-        settingsSection.style.display =
-          currentlyVisible
-            ? "none"
-            : "";
+      if (state.scanning) {
+        return;
       }
 
-      const settingsNav =
-        document.querySelector(
-          '.nav-button[data-view="settings"]'
-        );
-
-      if (settingsNav) {
-        settingsNav.click();
-      }
+      await showView(
+        "settings"
+      );
     }
   );
 }
 
 
 /* =========================================================
-   REFRESH RESULTS
+   REFRESH
 ========================================================= */
 
 function setupRefreshButton() {
@@ -1793,15 +2372,19 @@ function setupRefreshButton() {
 
   button.addEventListener(
     "click",
-    async () => {
-      button.disabled = true;
+    async event => {
+      event.preventDefault();
+
+      button.disabled =
+        true;
 
       try {
         await loadHistory();
 
         setStatus(
-          "Results refreshed."
+          "History refreshed."
         );
+
       } catch (error) {
         console.error(
           "Refresh failed:",
@@ -1814,8 +2397,10 @@ function setupRefreshButton() {
             "Unknown error"
           }`
         );
+
       } finally {
-        button.disabled = false;
+        button.disabled =
+          false;
       }
     }
   );
@@ -1823,15 +2408,10 @@ function setupRefreshButton() {
 
 
 /* =========================================================
-   MAIN BUTTON
+   SCAN BUTTON
 ========================================================= */
 
 function setupScanButton() {
-  /*
-   * Actual index.html ID:
-   * #findSitesButton
-   */
-
   const button =
     $("#findSitesButton") ||
     $("#findSites") ||
@@ -1866,13 +2446,11 @@ function setupScanButton() {
 
 
 /* =========================================================
-   NORMALIZATION HELPERS
+   NORMALIZATION
 ========================================================= */
 
 function normalizeDomain(value) {
-  if (
-    value == null
-  ) {
+  if (value == null) {
     return "";
   }
 
@@ -1885,29 +2463,17 @@ function normalizeDomain(value) {
     return "";
   }
 
-  /*
-   * Remove protocol.
-   */
-
   domain =
     domain.replace(
       /^https?:\/\//i,
       ""
     );
 
-  /*
-   * Remove www.
-   */
-
   domain =
     domain.replace(
       /^www\./i,
       ""
     );
-
-  /*
-   * Remove path/query/hash.
-   */
 
   domain =
     domain.split("/")[0];
@@ -1917,10 +2483,6 @@ function normalizeDomain(value) {
 
   domain =
     domain.split("#")[0];
-
-  /*
-   * Remove trailing dot.
-   */
 
   domain =
     domain.replace(
@@ -1933,9 +2495,7 @@ function normalizeDomain(value) {
 
 
 function normalizeStringArray(value) {
-  if (
-    Array.isArray(value)
-  ) {
+  if (Array.isArray(value)) {
     return value
       .map(
         item =>
@@ -1945,9 +2505,7 @@ function normalizeStringArray(value) {
       .filter(Boolean);
   }
 
-  if (
-    value == null
-  ) {
+  if (value == null) {
     return [];
   }
 
@@ -1964,9 +2522,7 @@ function normalizeStringArray(value) {
 
 
 function normalizeConfidence(value) {
-  if (
-    value == null
-  ) {
+  if (value == null) {
     return "Unknown";
   }
 
@@ -1974,7 +2530,8 @@ function normalizeConfidence(value) {
     String(value)
       .trim();
 
-  return text || "Unknown";
+  return text ||
+    "Unknown";
 }
 
 
@@ -2040,7 +2597,9 @@ function escapeHtml(value) {
 
 
 function escapeAttribute(value) {
-  return escapeHtml(value)
+  return escapeHtml(
+    value
+  )
     .replace(
       /javascript:/gi,
       ""
@@ -2071,10 +2630,18 @@ async function initApp() {
   setProgressPercent(0);
 
   /*
-   * Load already saved Gemini results.
+   * Load saved Gemini history.
    */
 
   await loadHistory();
+
+  /*
+   * Make Home the initial view.
+   */
+
+  await showView(
+    "home"
+  );
 
   console.log(
     "LD76 Investment Radar ready."
