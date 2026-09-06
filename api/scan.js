@@ -2,135 +2,184 @@
 
 /*
  * LD76 Investment Radar
- * api/scan.js
+ * Website scanner
  *
- * Purpose:
- * - Check discovered domains
- * - Detect active websites
- * - Extract useful website text
- * - Detect investment / earning signals
- * - Detect selected payment methods
- * - Collect transparency evidence
- * - Return candidates for Gemini
+ * Strategy:
+ * 1. Scan all supplied domains in parallel.
+ * 2. Inspect raw HTML + extracted text + URLs.
+ * 3. Detect investment/earning signals.
+ * 4. Detect selected payment methods.
+ * 5. Only promising domains receive deeper page scans.
  *
- * IMPORTANT:
- * Transparency information is EVIDENCE for Gemini.
- * Missing privacy/about/contact pages must NOT automatically
- * reject a domain.
+ * No artificial 4/5 candidate limit.
  */
 
-const MAX_DOMAINS_PER_REQUEST = 50;
-const CONCURRENCY = 10;
+const CONCURRENCY = 25;
 
-const REQUEST_TIMEOUT_MS = 3500;
-const MAX_HTML_BYTES = 300000;
-const MAX_TEXT_CHARS = 70000;
+const REQUEST_TIMEOUT_MS = 4500;
 
-const MAX_EXTRA_PAGES = 4;
+const MAX_HTML_BYTES = 350000;
 
-/*
- * Investment / earning vocabulary.
- *
- * We deliberately use broad detection here.
- * Gemini will make the final Scam Score decision.
- */
+const MAX_TEXT_CHARS = 90000;
+
+const MAX_DEEP_PAGES = 8;
+
+
+/* -------------------------------------------------------
+ * INVESTMENT / EARNING SIGNALS
+ * ----------------------------------------------------- */
+
 const INVESTMENT_PATTERNS = [
-  /\binvest(?:ment|ing)?\b/i,
+  /\binvest\b/i,
+  /\binvestment\b/i,
+  /\binvesting\b/i,
+  /\binvestor\b/i,
+  /\binvestors\b/i,
+
   /\bdeposit\b/i,
   /\bdeposits\b/i,
+  /\bdeposit\s+funds?\b/i,
+
   /\bprofit\b/i,
   /\bprofits\b/i,
+  /\bprofit\s+plan\b/i,
+  /\bprofit\s+plans\b/i,
+
   /\breturn\b/i,
   /\breturns\b/i,
+  /\breturn\s+on\s+investment\b/i,
+
   /\broi\b/i,
+
   /\bearning\b/i,
   /\bearnings\b/i,
   /\bearn\b/i,
+
   /\bincome\b/i,
-  /\bpassive income\b/i,
+  /\bpassive\s+income\b/i,
+  /\bpassive\s+earning\b/i,
+  /\bpassive\s+earnings\b/i,
+
   /\bwithdraw\b/i,
   /\bwithdrawal\b/i,
   /\bwithdrawals\b/i,
+
   /\bmaturity\b/i,
-  /\binvestment plan\b/i,
-  /\binvestment plans\b/i,
-  /\bearning plan\b/i,
-  /\bearning plans\b/i,
-  /\bprofit plan\b/i,
-  /\bprofit plans\b/i,
+
+  /\binvestment\s+plan\b/i,
+  /\binvestment\s+plans\b/i,
+
+  /\bearning\s+plan\b/i,
+  /\bearning\s+plans\b/i,
+
+  /\bprofit\s+rate\b/i,
+  /\breturn\s+rate\b/i,
+
   /\breferral\b/i,
   /\baffiliate\b/i,
   /\bcommission\b/i,
-  /\bteam income\b/i,
-  /\bteam bonus\b/i,
+
+  /\binvite\s+and\s+earn\b/i,
+  /\bteam\s+income\b/i,
+  /\bteam\s+bonus\b/i,
+
   /\bbonus\b/i,
-  /\bpassive earning\b/i,
-  /\bpassive earnings\b/i,
-  /\bfinancial freedom\b/i,
-  /\bmake money\b/i,
-  /\bget paid\b/i,
-  /\bwealth\b/i,
+  /\breward\b/i,
+
+  /\bmake\s+money\b/i,
+  /\bget\s+paid\b/i,
+  /\bfinancial\s+freedom\b/i,
+
   /\btrading\b/i,
+  /\bforex\b/i,
+  /\bforex\s+trading\b/i,
+
   /\bstaking\b/i,
   /\byield\b/i,
-  /\binterest\b/i,
-  /\binvestor\b/i,
-  /\binvestors\b/i,
+
+  /\bcrypto\s+investment\b/i,
+  /\bcrypto\s+earning\b/i,
+
+  /\bwealth\b/i,
+  /\bcapital\b/i,
+  /\bportfolio\b/i,
   /\bfund\b/i,
   /\bfunds\b/i,
-  /\bportfolio\b/i,
-  /\bcapital\b/i,
-  /\basset management\b/i,
-  /\bforex\b/i,
-  /\bforex trading\b/i,
-  /\bcrypto investment\b/i,
-  /\bcrypto earning\b/i
+  /\basset\s+management\b/i
 ];
 
-/*
- * Daily / periodic return claims.
- */
+
+/* -------------------------------------------------------
+ * DAILY / ROI CLAIMS
+ * ----------------------------------------------------- */
+
 const DAILY_RETURN_PATTERNS = [
   /\b\d+(?:\.\d+)?\s*%\s*(?:per\s*)?day\b/i,
   /\b\d+(?:\.\d+)?\s*%\s*daily\b/i,
-  /\bdaily\s+(?:profit|return|income|earning|earnings)\b/i,
-  /\b(?:profit|return|income|earning)\s+(?:of\s+)?\d+(?:\.\d+)?\s*%\b/i,
+  /\bdaily\s+profit\b/i,
+  /\bdaily\s+return\b/i,
+  /\bdaily\s+income\b/i,
+  /\bdaily\s+earning\b/i,
+  /\bdaily\s+earnings\b/i,
+
   /\b\d+(?:\.\d+)?\s*%\s*per\s*week\b/i,
   /\b\d+(?:\.\d+)?\s*%\s*weekly\b/i,
+
   /\b\d+(?:\.\d+)?\s*%\s*per\s*month\b/i,
-  /\b\d+(?:\.\d+)?\s*%\s*monthly\b/i
+  /\b\d+(?:\.\d+)?\s*%\s*monthly\b/i,
+
+  /\bprofit\s+of\s+\d+(?:\.\d+)?\s*%\b/i,
+  /\breturn\s+of\s+\d+(?:\.\d+)?\s*%\b/i,
+
+  /\bguaranteed\s+profit\b/i,
+  /\bguaranteed\s+return\b/i,
+  /\bguaranteed\s+income\b/i,
+  /\bfixed\s+profit\b/i,
+  /\bfixed\s+return\b/i,
+  /\bfixed\s+income\b/i
 ];
 
-/*
- * ROI patterns.
- */
 const ROI_PATTERNS = [
   /\broi\b/i,
-  /\breturn on investment\b/i,
-  /\b\d+(?:\.\d+)?\s*%\s*(?:roi|return)\b/i,
+  /\breturn\s+on\s+investment\b/i,
   /\bprofit\s+rate\b/i,
   /\breturn\s+rate\b/i,
-  /\bpercentage\s+return\b/i
+  /\bpercentage\s+return\b/i,
+  /\b\d+(?:\.\d+)?\s*%\s*(?:roi|return|profit)\b/i
 ];
 
-/*
- * Payment methods.
- */
+
+/* -------------------------------------------------------
+ * PAYMENT METHODS
+ * ----------------------------------------------------- */
+
 const PAYMENT_PATTERNS = {
   bank: [
-    /\bbank transfer\b/i,
-    /\bbank deposit\b/i,
-    /\bbank account\b/i,
-    /\baccount number\b/i,
-    /\baccount title\b/i,
-    /\baccount holder\b/i,
+    /\bbank\s+transfer\b/i,
+    /\bbank\s+deposit\b/i,
+    /\bbank\s+account\b/i,
+    /\bbank\s+details\b/i,
+    /\bbank\s+payment\b/i,
+    /\bbank\s+deposit\b/i,
+    /\baccount\s+number\b/i,
+    /\baccount\s+title\b/i,
+    /\baccount\s+holder\b/i,
+    /\baccount\s+name\b/i,
     /\bibAN\b/i,
     /\biban\b/i,
     /\bpkr\b/i,
-    /\bpakistani rupees?\b/i,
-    /\bpakistan bank\b/i,
-    /\bbanking\b/i,
-    /\bwire transfer\b/i
+    /\bpakistani\s+rupees?\b/i,
+    /\bpakistan\s+bank\b/i,
+    /\bwire\s+transfer\b/i,
+    /\bwire\s+payment\b/i,
+    /\bhabib\s+bank\b/i,
+    /\bhbl\b/i,
+    /\bmeezan\b/i,
+    /\bubl\b/i,
+    /\bmcb\b/i,
+    /\balfalah\b/i,
+    /\bfaysal\s+bank\b/i,
+    /\bjs\s+bank\b/i
   ],
 
   easypaisa: [
@@ -145,6 +194,7 @@ const PAYMENT_PATTERNS = {
 
   crypto: [
     /\busdt\b/i,
+    /\busdt\s*(?:trc20|erc20|bep20)?\b/i,
     /\btrc20\b/i,
     /\berc20\b/i,
     /\bbep20\b/i,
@@ -154,51 +204,85 @@ const PAYMENT_PATTERNS = {
     /\beth\b/i,
     /\bcrypto\b/i,
     /\bcryptocurrency\b/i,
-    /\bwallet address\b/i,
-    /\bcrypto wallet\b/i,
+    /\bcrypto\s+wallet\b/i,
+    /\bwallet\s+address\b/i,
     /\busdc\b/i,
     /\bsolana\b/i,
     /\btron\b/i
   ]
 };
 
-/*
- * Pages that commonly contain useful evidence.
- */
+
+/* -------------------------------------------------------
+ * RELEVANT PAGES
+ * ----------------------------------------------------- */
+
 const RELEVANT_PATHS = [
   "/about",
   "/about-us",
   "/company",
+  "/company-profile",
+
   "/contact",
   "/contact-us",
+
   "/privacy",
   "/privacy-policy",
+
   "/terms",
   "/terms-and-conditions",
+  "/terms-of-service",
+
   "/legal",
+  "/legal-notice",
+
   "/refund",
   "/refund-policy",
+
   "/risk",
   "/risk-disclosure",
-  "/withdraw",
-  "/withdrawal",
-  "/deposit",
-  "/investment",
+
   "/invest",
+  "/investment",
+  "/investments",
+
+  "/deposit",
+  "/deposits",
+  "/deposit-funds",
+
   "/plans",
   "/investment-plans",
-  "/pricing",
+  "/earning-plans",
+  "/profit-plans",
+
   "/profit",
+  "/profits",
+
   "/earning",
+  "/earnings",
+
+  "/income",
+
+  "/withdraw",
+  "/withdrawal",
+  "/withdrawals",
+
+  "/payment",
+  "/payments",
+
   "/support",
+  "/help",
   "/faq",
+
   "/referral",
+  "/referrals",
   "/affiliate"
 ];
 
-/* =========================================================
-   MAIN HANDLER
-========================================================= */
+
+/* -------------------------------------------------------
+ * MAIN HANDLER
+ * ----------------------------------------------------- */
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -220,14 +304,14 @@ export default async function handler(req, res) {
     );
 
     /*
-     * We intentionally scan a reasonable batch because
-     * Vercel serverless functions have execution limits.
+     * IMPORTANT:
+     * Do NOT slice domains here.
      *
-     * The candidate limit itself is NOT 4/5.
+     * If discovery gives 381 domains,
+     * scanner receives all 381.
      */
     const domains = uniqueDomains(
       rawDomains
-        .slice(0, MAX_DOMAINS_PER_REQUEST)
         .map(normalizeInputDomain)
         .filter(Boolean)
     );
@@ -243,68 +327,58 @@ export default async function handler(req, res) {
       });
     }
 
-    const scanResults = [];
+    const results = [];
 
     await runWithConcurrency(
       domains,
       CONCURRENCY,
-      async domainItem => {
-        const result = await scanDomain(
-          domainItem
-        );
+      async item => {
+        try {
+          const result =
+            await scanDomain(item);
 
-        scanResults.push(result);
+          results.push(result);
+        } catch (error) {
+          results.push({
+            domain: item.domain,
+            status: "error",
+            errors: [
+              error?.message ||
+              "Scanner worker failed"
+            ]
+          });
+        }
       }
     );
 
-    /*
-     * Only active websites continue.
-     */
-    const active = scanResults.filter(
-      item => item.status === "active"
-    );
-
-    /*
-     * Investment / earning relevance.
-     */
-    const investmentMatches = active.filter(
-      item => item.investment.relevant
-    );
-
-    /*
-     * Payment filter.
-     *
-     * If payment methods were selected,
-     * at least one selected method must be detected.
-     */
-    const paymentMatches = investmentMatches.filter(
+    const active = results.filter(
       item =>
-        hasSelectedPayment(
-          item.paymentMethods,
-          selectedPayments
-        )
+        item.status === "active"
     );
 
+    const investmentMatches =
+      active.filter(
+        item =>
+          item.investment?.relevant
+      );
+
+    const paymentMatches =
+      investmentMatches.filter(
+        item =>
+          hasSelectedPayment(
+            item.paymentMethods,
+            selectedPayments
+          )
+      );
+
     /*
-     * IMPORTANT:
-     *
-     * We do NOT require:
-     * - company registration
-     * - privacy policy
-     * - terms
-     * - contact page
-     * - support page
-     *
-     * Those are evidence for Gemini.
-     *
-     * If investment + selected payment evidence exists,
-     * the site is a candidate.
+     * No candidate limit.
      */
-    const candidates = paymentMatches
-      .sort(
+    const candidates =
+      paymentMatches.sort(
         (a, b) =>
-          b.investment.score -
-          a.investment.score
+          (b.investment?.score || 0) -
+          (a.investment?.score || 0)
       );
 
     return res.status(200).json({
@@ -339,26 +413,23 @@ export default async function handler(req, res) {
   }
 }
 
-/* =========================================================
-   DOMAIN SCANNER
-========================================================= */
+
+/* -------------------------------------------------------
+ * DOMAIN SCANNER
+ * ----------------------------------------------------- */
 
 async function scanDomain(input) {
   const domain =
-    normalizeDomain(
-      input?.domain
-    );
+    normalizeDomain(input?.domain);
 
   const result = {
     domain,
 
     registeredAt:
-      input?.registeredAt ||
-      null,
+      input?.registeredAt || null,
 
     discoveredAt:
-      input?.discoveredAt ||
-      null,
+      input?.discoveredAt || null,
 
     lastScanned:
       new Date().toISOString(),
@@ -382,6 +453,8 @@ async function scanDomain(input) {
     pagesChecked: [],
 
     content: "",
+
+    rawSignals: [],
 
     snippets: [],
 
@@ -425,31 +498,34 @@ async function scanDomain(input) {
     return result;
   }
 
-  /*
-   * First try HTTPS.
-   */
-  let page = await fetchPage(
-    `https://${domain}/`
-  );
 
-  /*
-   * Fallback to HTTP.
-   */
-  if (!page.ok) {
-    page = await fetchPage(
-      `http://${domain}/`
+  /* ---------------------------------------------
+   * FIRST REQUEST
+   * ------------------------------------------- */
+
+  let page =
+    await fetchPage(
+      `https://${domain}/`
     );
+
+  if (!page.ok && !page.hasContent) {
+    page =
+      await fetchPage(
+        `http://${domain}/`
+      );
   }
 
   /*
-   * Website unavailable.
+   * A 403/401/429 page can still contain useful
+   * title/content/signals.
    */
-  if (!page.ok) {
+  if (!page.hasContent) {
     result.errors =
       [page.error].filter(Boolean);
 
     return result;
   }
+
 
   result.status = "active";
 
@@ -476,155 +552,240 @@ async function scanDomain(input) {
       result.redirects.length
   };
 
-  /*
-   * Basic metadata.
-   */
+
+  /* ---------------------------------------------
+   * HOMEPAGE DATA
+   * ------------------------------------------- */
+
   result.title =
-    extractTitle(
-      page.text
-    );
+    extractTitle(page.text);
 
   result.websiteName =
-    result.title ||
-    domain;
+    result.title || domain;
 
   result.description =
     extractMetaDescription(
       page.text
     );
 
+
   /*
-   * Find relevant internal links.
+   * Inspect BOTH raw HTML and visible text.
+   *
+   * This catches:
+   * - JS app strings
+   * - payment labels
+   * - hidden navigation URLs
+   * - meta descriptions
+   * - hrefs
    */
-  const internalLinks =
+
+  const rawText =
+    normalizeForSearch(
+      page.text
+    );
+
+  const visibleText =
+    extractUsefulText(
+      page.text
+    );
+
+  const linksText =
+    extractAllLinksAsText(
+      page.text
+    );
+
+  const combinedInitial =
+    normalizeForSearch(
+      [
+        rawText,
+        visibleText,
+        linksText,
+        result.title || "",
+        result.description || ""
+      ].join(" ")
+    );
+
+
+  /* ---------------------------------------------
+   * INITIAL DETECTION
+   * ------------------------------------------- */
+
+  result.investment =
+    analyzeInvestmentContent(
+      combinedInitial
+    );
+
+  result.paymentMethods =
+    detectPaymentMethods(
+      combinedInitial
+    );
+
+
+  result.transparency =
+    analyzeTransparency(
+      combinedInitial
+    );
+
+
+  /*
+   * Deep scan when:
+   *
+   * A) investment signal exists
+   * OR
+   * B) payment signal exists
+   * OR
+   * C) homepage has relevant links
+   *
+   * This prevents wasting time on every random
+   * website page.
+   */
+
+  const relevantLinks =
     extractRelevantLinks(
       page.text,
       page.finalUrl ||
         `https://${domain}/`
     );
 
-  /*
-   * Add known paths if they exist in
-   * the page links, then fetch a small number.
-   */
-  const extraUrls =
-    uniqueStrings([
-      ...internalLinks,
-      ...buildRelevantPathUrls(
-        domain,
-        page.finalUrl
-      )
-    ]).slice(
-      0,
-      MAX_EXTRA_PAGES
-    );
+  const shouldDeepScan =
+    result.investment.relevant ||
+    result.paymentMethods.detected.length > 0 ||
+    relevantLinks.length > 0;
 
-  const pages = [page];
 
-  /*
-   * Fetch extra pages concurrently.
-   */
-  const extraResults =
-    await Promise.all(
-      extraUrls.map(
-        url =>
-          fetchPage(url)
-      )
-    );
-
-  for (
-    const extraPage
-    of extraResults
-  ) {
-    if (extraPage.ok) {
-      pages.push(
-        extraPage
+  if (shouldDeepScan) {
+    const deepUrls =
+      uniqueStrings([
+        ...relevantLinks,
+        ...buildRelevantPathUrls(
+          domain,
+          page.finalUrl
+        )
+      ]).slice(
+        0,
+        MAX_DEEP_PAGES
       );
+
+    if (deepUrls.length) {
+      const deepPages =
+        await Promise.all(
+          deepUrls.map(
+            url =>
+              fetchPage(url)
+          )
+        );
+
+      const successfulDeepPages =
+        deepPages.filter(
+          item =>
+            item.hasContent
+        );
+
+      const allPages = [
+        page,
+        ...successfulDeepPages
+      ];
+
+      result.pagesChecked =
+        uniqueStrings(
+          allPages.map(
+            item =>
+              item.finalUrl
+          )
+        );
+
+      const deepText =
+        allPages
+          .map(
+            item =>
+              normalizeForSearch(
+                [
+                  item.text,
+                  extractUsefulText(
+                    item.text
+                  ),
+                  extractAllLinksAsText(
+                    item.text
+                  )
+                ].join(" ")
+              )
+          )
+          .filter(Boolean)
+          .join(" ")
+          .slice(
+            0,
+            MAX_TEXT_CHARS
+          );
+
+
+      result.content =
+        deepText;
+
+
+      /*
+       * Re-run detection using ALL pages.
+       */
+      result.investment =
+        analyzeInvestmentContent(
+          deepText
+        );
+
+      result.paymentMethods =
+        detectPaymentMethods(
+          deepText
+        );
+
+      result.transparency =
+        analyzeTransparency(
+          deepText
+        );
+
+      result.snippets =
+        extractRelevantSnippets(
+          deepText
+        );
+
+    } else {
+      result.content =
+        combinedInitial;
+
+      result.snippets =
+        extractRelevantSnippets(
+          combinedInitial
+        );
     }
+
+  } else {
+    result.content =
+      combinedInitial;
+
+    result.snippets =
+      extractRelevantSnippets(
+        combinedInitial
+      );
   }
 
-  result.pagesChecked =
-    uniqueStrings(
-      pages.map(
-        item =>
-          item.finalUrl
-      )
-    );
 
   /*
-   * Extract readable text from every page.
-   */
-  const combinedText =
-    pages
-      .map(
-        item =>
-          extractUsefulText(
-            item.text
-          )
-      )
-      .filter(Boolean)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(
-        0,
-        MAX_TEXT_CHARS
-      );
-
-  result.content =
-    combinedText;
-
-  /*
-   * Investment detection.
-   */
-  result.investment =
-    analyzeInvestmentContent(
-      combinedText
-    );
-
-  /*
-   * Payment detection.
-   */
-  result.paymentMethods =
-    detectPaymentMethods(
-      combinedText
-    );
-
-  /*
-   * Transparency evidence.
-   */
-  result.transparency =
-    analyzeTransparency(
-      combinedText
-    );
-
-  /*
-   * Small useful evidence snippets.
-   */
-  result.snippets =
-    extractRelevantSnippets(
-      combinedText
-    );
-
-  /*
-   * Candidate logic:
+   * Candidate requires:
    *
-   * Investment relevance +
-   * at least one detected payment method.
-   *
-   * Transparency does NOT block candidate.
+   * investment relevance
+   * +
+   * selected payment method
    */
   result.transparency.candidate =
     result.investment.relevant &&
-    result.paymentMethods.detected
-      .length > 0;
+    result.paymentMethods.detected.length > 0;
+
 
   return result;
 }
 
-/* =========================================================
-   FETCH PAGE
-========================================================= */
+
+/* -------------------------------------------------------
+ * FETCH PAGE
+ * ----------------------------------------------------- */
 
 async function fetchPage(url) {
   const controller =
@@ -632,9 +793,8 @@ async function fetchPage(url) {
 
   const timer =
     setTimeout(
-      () => {
-        controller.abort();
-      },
+      () =>
+        controller.abort(),
       REQUEST_TIMEOUT_MS
     );
 
@@ -647,32 +807,31 @@ async function fetchPage(url) {
 
           redirect: "follow",
 
-          signal:
-            controller.signal,
+          signal: controller.signal,
 
           headers: {
             "User-Agent":
               "Mozilla/5.0 (compatible; LD76-Investment-Radar/1.0)",
 
             Accept:
-              "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"
+              "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8",
+
+            "Accept-Language":
+              "en-US,en;q=0.8"
           }
         }
       );
 
-    clearTimeout(
-      timer
-    );
 
     const contentType =
-      response.headers.get(
-        "content-type"
-      ) || "";
+      (
+        response.headers.get(
+          "content-type"
+        ) || ""
+      ).toLowerCase();
 
-    /*
-     * HTML and XHTML are useful.
-     */
-    const isHtml =
+
+    const isUsefulType =
       contentType.includes(
         "text/html"
       ) ||
@@ -681,58 +840,72 @@ async function fetchPage(url) {
       ) ||
       contentType.includes(
         "text/plain"
+      ) ||
+      contentType.includes(
+        "application/json"
       );
 
-    if (!isHtml) {
+
+    if (!isUsefulType) {
+      clearTimeout(timer);
+
       return {
         ok: false,
-        status:
-          response.status,
-        finalUrl:
-          response.url,
+        hasContent: false,
+        status: response.status,
+        finalUrl: response.url,
+        redirects: [],
         error:
           `Unsupported content type: ${contentType}`
       };
     }
 
-    /*
-     * Read body with a size limit.
-     */
+
     const reader =
       response.body?.getReader();
 
+
     if (!reader) {
+      clearTimeout(timer);
+
       return {
         ok: false,
-        status:
-          response.status,
-        finalUrl:
-          response.url,
+        hasContent: false,
+        status: response.status,
+        finalUrl: response.url,
+        redirects: [],
         error:
           "Response body unavailable"
       };
     }
 
+
     const chunks = [];
 
     let totalBytes = 0;
+
 
     while (true) {
       const {
         done,
         value
-      } = await reader.read();
+      } =
+        await reader.read();
+
 
       if (done) {
         break;
       }
 
+
       if (!value) {
         continue;
       }
 
+
       totalBytes +=
         value.byteLength;
+
 
       if (
         totalBytes >
@@ -745,15 +918,19 @@ async function fetchPage(url) {
         break;
       }
 
-      chunks.push(
-        value
-      );
+
+      chunks.push(value);
     }
+
+
+    clearTimeout(timer);
+
 
     const bytes =
       combineUint8Arrays(
         chunks
       );
+
 
     const text =
       new TextDecoder(
@@ -761,13 +938,22 @@ async function fetchPage(url) {
         {
           fatal: false
         }
-      ).decode(
-        bytes
-      );
+      ).decode(bytes);
+
+
+    /*
+     * Even non-2xx pages can have useful
+     * content/signals.
+     */
+    const hasContent =
+      text.trim().length > 20;
+
 
     return {
       ok:
         response.ok,
+
+      hasContent,
 
       status:
         response.status,
@@ -781,12 +967,12 @@ async function fetchPage(url) {
     };
 
   } catch (error) {
-    clearTimeout(
-      timer
-    );
+    clearTimeout(timer);
 
     return {
       ok: false,
+
+      hasContent: false,
 
       error:
         error?.name ===
@@ -800,9 +986,10 @@ async function fetchPage(url) {
   }
 }
 
-/* =========================================================
-   INVESTMENT ANALYSIS
-========================================================= */
+
+/* -------------------------------------------------------
+ * INVESTMENT ANALYSIS
+ * ----------------------------------------------------- */
 
 function analyzeInvestmentContent(
   text
@@ -814,9 +1001,7 @@ function analyzeInvestmentContent(
     of INVESTMENT_PATTERNS
   ) {
     const match =
-      text.match(
-        pattern
-      );
+      text.match(pattern);
 
     if (match) {
       keywords.push(
@@ -825,11 +1010,13 @@ function analyzeInvestmentContent(
     }
   }
 
+
   const dailyReturnClaims =
     collectMatches(
       text,
       DAILY_RETURN_PATTERNS
     );
+
 
   const roiClaims =
     collectMatches(
@@ -837,16 +1024,14 @@ function analyzeInvestmentContent(
       ROI_PATTERNS
     );
 
+
   let score = 0;
 
-  /*
-   * Internal relevance score.
-   * This is NOT the Gemini Scam Score.
-   */
 
   if (keywords.length > 0) {
     score += 10;
   }
+
 
   if (
     dailyReturnClaims.length > 0
@@ -854,11 +1039,13 @@ function analyzeInvestmentContent(
     score += 15;
   }
 
+
   if (
     roiClaims.length > 0
   ) {
     score += 15;
   }
+
 
   if (
     /\bdeposit\b/i.test(text)
@@ -866,13 +1053,15 @@ function analyzeInvestmentContent(
     score += 10;
   }
 
+
   if (
-    /\bwithdraw(?:al)?\b/i.test(
+    /\bwithdraw(?:al|als)?\b/i.test(
       text
     )
   ) {
     score += 10;
   }
+
 
   if (
     /\b(?:referral|affiliate|commission)\b/i.test(
@@ -882,6 +1071,7 @@ function analyzeInvestmentContent(
     score += 10;
   }
 
+
   if (
     /\b(?:guaranteed|fixed)\s+(?:profit|return|income|earning)\b/i.test(
       text
@@ -890,16 +1080,21 @@ function analyzeInvestmentContent(
     score += 15;
   }
 
+
   /*
-   * Broad investment relevance.
+   * Require an actual financial/earning
+   * concept, not just a generic word such as
+   * "return" in navigation.
    */
-  const relevant =
-    keywords.length > 0 &&
-    (
-      /\b(?:invest|investment|investing|deposit|profit|roi|return|earning|earnings|income|withdraw|withdrawal|yield|staking|trading|forex)\b/i.test(
-        text
-      )
+  const strongInvestmentSignal =
+    /\b(?:invest|investment|investing|investor|deposit|profit|profits|roi|return\s+on\s+investment|earning|earnings|passive\s+income|withdraw|withdrawal|investment\s+plan|earning\s+plan|profit\s+plan|trading|forex|staking|yield|crypto\s+investment)\b/i.test(
+      text
     );
+
+
+  const relevant =
+    strongInvestmentSignal;
+
 
   return {
     relevant,
@@ -932,9 +1127,10 @@ function analyzeInvestmentContent(
   };
 }
 
-/* =========================================================
-   PAYMENT DETECTION
-========================================================= */
+
+/* -------------------------------------------------------
+ * PAYMENT DETECTION
+ * ----------------------------------------------------- */
 
 function detectPaymentMethods(
   text
@@ -947,22 +1143,19 @@ function detectPaymentMethods(
     detected: []
   };
 
+
   for (
-    const type
-    of Object.keys(
+    const type of Object.keys(
       PAYMENT_PATTERNS
     )
   ) {
     result[type] =
-      PAYMENT_PATTERNS[
-        type
-      ].some(
+      PAYMENT_PATTERNS[type].some(
         pattern =>
-          pattern.test(
-            text
-          )
+          pattern.test(text)
       );
   }
+
 
   if (result.bank) {
     result.detected.push(
@@ -970,11 +1163,13 @@ function detectPaymentMethods(
     );
   }
 
+
   if (result.easypaisa) {
     result.detected.push(
       "Easypaisa"
     );
   }
+
 
   if (result.jazzcash) {
     result.detected.push(
@@ -982,26 +1177,30 @@ function detectPaymentMethods(
     );
   }
 
+
   if (result.crypto) {
     result.detected.push(
       "Crypto"
     );
   }
 
+
   return result;
 }
+
+
+/* -------------------------------------------------------
+ * PAYMENT FILTER
+ * ----------------------------------------------------- */
 
 function hasSelectedPayment(
   detected,
   selected
 ) {
-  /*
-   * No selected filter means don't block
-   * the candidate.
-   */
   if (!selected.length) {
     return true;
   }
+
 
   return selected.some(
     type =>
@@ -1010,6 +1209,11 @@ function hasSelectedPayment(
       )
   );
 }
+
+
+/* -------------------------------------------------------
+ * PAYMENT NORMALIZATION
+ * ----------------------------------------------------- */
 
 function normalizePayments(
   value
@@ -1021,6 +1225,7 @@ function normalizePayments(
       "jazzcash"
     ];
   }
+
 
   return uniqueStrings(
     value.map(
@@ -1040,9 +1245,10 @@ function normalizePayments(
   );
 }
 
-/* =========================================================
-   TRANSPARENCY ANALYSIS
-========================================================= */
+
+/* -------------------------------------------------------
+ * TRANSPARENCY
+ * ----------------------------------------------------- */
 
 function analyzeTransparency(
   text
@@ -1063,9 +1269,13 @@ function analyzeTransparency(
         /\bmanagement\b/i,
         /\bmanagement team\b/i,
         /\bdirector\b/i,
-        /\bteam\b/i
+        /\bteam\b/i,
+        /\blicense\b/i,
+        /\blicensed\b/i,
+        /\bregulator\b/i
       ]
     );
+
 
   const legal =
     findMatches(
@@ -1083,6 +1293,7 @@ function analyzeTransparency(
       ]
     );
 
+
   const support =
     findMatches(
       text,
@@ -1099,9 +1310,11 @@ function analyzeTransparency(
         /\bdiscord\b/i,
         /\bfaq\b/i,
         /\bphone\b/i,
-        /\btelephone\b/i
+        /\btelephone\b/i,
+        /\bemail\b/i
       ]
     );
+
 
   return {
     company:
@@ -1109,7 +1322,7 @@ function analyzeTransparency(
         company
       ).slice(
         0,
-        20
+        30
       ),
 
     legal:
@@ -1117,7 +1330,7 @@ function analyzeTransparency(
         legal
       ).slice(
         0,
-        20
+        30
       ),
 
     support:
@@ -1125,20 +1338,17 @@ function analyzeTransparency(
         support
       ).slice(
         0,
-        20
+        30
       ),
 
-    /*
-     * This is informational only.
-     * It does NOT decide candidate eligibility.
-     */
     candidate: false
   };
 }
 
-/* =========================================================
-   RELEVANT LINKS
-========================================================= */
+
+/* -------------------------------------------------------
+ * RELEVANT LINKS
+ * ----------------------------------------------------- */
 
 function extractRelevantLinks(
   html,
@@ -1150,10 +1360,13 @@ function extractRelevantLinks(
     return urls;
   }
 
+
   const hrefRegex =
-    /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']/gi;
+    /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
+
 
   let match;
+
 
   while (
     (match =
@@ -1164,12 +1377,15 @@ function extractRelevantLinks(
     const raw =
       match[1];
 
+
     if (!raw) {
       continue;
     }
 
+
     const lower =
       raw.toLowerCase();
+
 
     const relevant =
       RELEVANT_PATHS.some(
@@ -1179,9 +1395,11 @@ function extractRelevantLinks(
           )
       );
 
+
     if (!relevant) {
       continue;
     }
+
 
     try {
       const url =
@@ -1190,13 +1408,12 @@ function extractRelevantLinks(
           baseUrl
         );
 
-      /*
-       * Only same-origin pages.
-       */
+
       const base =
         new URL(
           baseUrl
         );
+
 
       if (
         url.hostname !==
@@ -1205,7 +1422,9 @@ function extractRelevantLinks(
         continue;
       }
 
+
       url.hash = "";
+
 
       urls.push(
         url.href
@@ -1216,23 +1435,24 @@ function extractRelevantLinks(
     }
   }
 
+
   return uniqueStrings(
     urls
   );
 }
 
-/* =========================================================
-   BUILD KNOWN PATH URLS
-========================================================= */
+
+/* -------------------------------------------------------
+ * BUILD RELEVANT URLS
+ * ----------------------------------------------------- */
 
 function buildRelevantPathUrls(
   domain,
   finalUrl
 ) {
-  const urls = [];
-
   let origin =
     `https://${domain}`;
+
 
   try {
     if (finalUrl) {
@@ -1243,21 +1463,58 @@ function buildRelevantPathUrls(
     }
   } catch {}
 
-  for (
-    const path
-    of RELEVANT_PATHS
-  ) {
-    urls.push(
+
+  return RELEVANT_PATHS.map(
+    path =>
       `${origin}${path}`
+  );
+}
+
+
+/* -------------------------------------------------------
+ * EXTRACT ALL LINKS
+ *
+ * This is important because payment/investment
+ * terms may exist only in href values.
+ * ----------------------------------------------------- */
+
+function extractAllLinksAsText(
+  html
+) {
+  if (!html) {
+    return "";
+  }
+
+
+  const values = [];
+
+
+  const hrefRegex =
+    /<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi;
+
+
+  let match;
+
+
+  while (
+    (match =
+      hrefRegex.exec(
+        html
+      )) !== null
+  ) {
+    values.push(
+      match[1]
     );
   }
 
-  return urls;
+
+  return values.join(" ");
 }
 
-/* =========================================================
-   TEXT EXTRACTION
-========================================================= */
+
+/* -------------------------------------------------------
+ * HTML → TEXT
+ * ----------------------------------------------------- */
 
 function extractUsefulText(
   html
@@ -1266,17 +1523,17 @@ function extractUsefulText(
     return "";
   }
 
+
   let text =
     String(html);
 
-  /*
-   * Remove scripts/styles/noscript.
-   */
+
   text =
     text.replace(
       /<script\b[^>]*>[\s\S]*?<\/script>/gi,
       " "
     );
+
 
   text =
     text.replace(
@@ -1284,11 +1541,13 @@ function extractUsefulText(
       " "
     );
 
+
   text =
     text.replace(
       /<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi,
       " "
     );
+
 
   text =
     text.replace(
@@ -1296,48 +1555,76 @@ function extractUsefulText(
       " "
     );
 
-  /*
-   * Convert common HTML separators to spaces.
-   */
+
   text =
     text.replace(
-      /<\/(?:p|div|section|article|li|h1|h2|h3|h4|h5|h6|br|tr|td)>/gi,
+      /<template\b[^>]*>[\s\S]*?<\/template>/gi,
       " "
     );
 
-  /*
-   * Remove tags.
-   */
+
+  text =
+    text.replace(
+      /<\/(?:p|div|section|article|li|h1|h2|h3|h4|h5|h6|br|tr|td|th|header|footer|nav)>/gi,
+      " "
+    );
+
+
   text =
     text.replace(
       /<[^>]+>/g,
       " "
     );
 
-  /*
-   * Decode common HTML entities.
-   */
+
   text =
     decodeHtmlEntities(
       text
     );
 
-  /*
-   * Normalize whitespace.
-   */
-  text =
-    text
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
 
-  return text.slice(
+  return normalizeForSearch(
+    text
+  ).slice(
     0,
     MAX_TEXT_CHARS
   );
 }
+
+
+/* -------------------------------------------------------
+ * NORMALIZE SEARCH TEXT
+ * ----------------------------------------------------- */
+
+function normalizeForSearch(
+  value
+) {
+  return String(
+    value || ""
+  )
+    .replace(
+      /\\u002f/gi,
+      "/"
+    )
+    .replace(
+      /\\u003a/gi,
+      ":"
+    )
+    .replace(
+      /\\u0026/gi,
+      "&"
+    )
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .trim();
+}
+
+
+/* -------------------------------------------------------
+ * TITLE
+ * ----------------------------------------------------- */
 
 function extractTitle(
   html
@@ -1346,14 +1633,17 @@ function extractTitle(
     return null;
   }
 
+
   const match =
     html.match(
       /<title\b[^>]*>([\s\S]*?)<\/title>/i
     );
 
+
   if (!match) {
     return null;
   }
+
 
   const title =
     decodeHtmlEntities(
@@ -1365,6 +1655,7 @@ function extractTitle(
       )
       .trim();
 
+
   return title
     ? title.slice(
         0,
@@ -1373,6 +1664,11 @@ function extractTitle(
     : null;
 }
 
+
+/* -------------------------------------------------------
+ * META DESCRIPTION
+ * ----------------------------------------------------- */
+
 function extractMetaDescription(
   html
 ) {
@@ -1380,11 +1676,15 @@ function extractMetaDescription(
     return null;
   }
 
+
   const patterns = [
     /<meta\b[^>]*name\s*=\s*["']description["'][^>]*content\s*=\s*["']([^"']*)["'][^>]*>/i,
 
-    /<meta\b[^>]*content\s*=\s*["']([^"']*)["'][^>]*name\s*=\s*["']description["'][^>]*>/i
+    /<meta\b[^>]*content\s*=\s*["']([^"']*)["'][^>]*name\s*=\s*["']description["'][^>]*>/i,
+
+    /<meta\b[^>]*property\s*=\s*["']og:description["'][^>]*content\s*=\s*["']([^"']*)["'][^>]*>/i
   ];
+
 
   for (
     const pattern
@@ -1394,6 +1694,7 @@ function extractMetaDescription(
       html.match(
         pattern
       );
+
 
     if (match) {
       const description =
@@ -1406,26 +1707,30 @@ function extractMetaDescription(
           )
           .trim();
 
+
       if (description) {
         return description.slice(
           0,
-          500
+          700
         );
       }
     }
   }
 
+
   return null;
 }
 
-/* =========================================================
-   SNIPPETS
-========================================================= */
+
+/* -------------------------------------------------------
+ * SNIPPETS
+ * ----------------------------------------------------- */
 
 function extractRelevantSnippets(
   text
 ) {
   const snippets = [];
+
 
   const patterns = [
     /\binvest(?:ment|ing)?\b/i,
@@ -1434,40 +1739,46 @@ function extractRelevantSnippets(
     /\broi\b/i,
     /\breturn\b/i,
     /\bearning\b/i,
+    /\bincome\b/i,
     /\bwithdraw(?:al)?\b/i,
     /\beasypaisa\b/i,
     /\bjazzcash\b/i,
-    /\bbank transfer\b/i,
+    /\bpkr\b/i,
+    /\bibAN\b/i,
+    /\bbank\s+transfer\b/i,
     /\busdt\b/i,
     /\btrc20\b/i,
-    /\breferral\b/i
+    /\breferral\b/i,
+    /\baffiliate\b/i
   ];
+
 
   for (
     const pattern
     of patterns
   ) {
     const match =
-      pattern.exec(
-        text
-      );
+      pattern.exec(text);
+
 
     if (!match) {
       continue;
     }
 
+
     const start =
       Math.max(
         0,
-        match.index - 160
+        match.index - 220
       );
+
 
     const end =
       Math.min(
         text.length,
-        match.index +
-          300
+        match.index + 420
       );
+
 
     snippets.push(
       text
@@ -1479,17 +1790,19 @@ function extractRelevantSnippets(
     );
   }
 
+
   return uniqueStrings(
     snippets
   ).slice(
     0,
-    20
+    25
   );
 }
 
-/* =========================================================
-   DOMAIN NORMALIZATION
-========================================================= */
+
+/* -------------------------------------------------------
+ * DOMAIN NORMALIZATION
+ * ----------------------------------------------------- */
 
 function normalizeInputDomain(
   item
@@ -1498,30 +1811,35 @@ function normalizeInputDomain(
     return null;
   }
 
-  if (
-    typeof item ===
-    "string"
-  ) {
-    return {
-      domain:
-        normalizeDomain(
-          item
-        )
-    };
-  }
 
   if (
-    typeof item ===
-    "object"
+    typeof item === "string"
+  ) {
+    const domain =
+      normalizeDomain(
+        item
+      );
+
+
+    return domain
+      ? { domain }
+      : null;
+  }
+
+
+  if (
+    typeof item === "object"
   ) {
     const domain =
       normalizeDomain(
         item.domain
       );
 
+
     if (!domain) {
       return null;
     }
+
 
     return {
       ...item,
@@ -1529,8 +1847,14 @@ function normalizeInputDomain(
     };
   }
 
+
   return null;
 }
+
+
+/* -------------------------------------------------------
+ * NORMALIZE DOMAIN
+ * ----------------------------------------------------- */
 
 function normalizeDomain(
   value
@@ -1539,10 +1863,12 @@ function normalizeDomain(
     return "";
   }
 
+
   let domain =
     String(value)
       .trim()
       .toLowerCase();
+
 
   domain =
     domain.replace(
@@ -1550,47 +1876,53 @@ function normalizeDomain(
       ""
     );
 
+
   domain =
     domain.replace(
       /^www\./,
       ""
     );
 
+
   domain =
     domain.split(
       "/"
     )[0];
+
 
   domain =
     domain.split(
       "?"
     )[0];
 
+
   domain =
     domain.split(
       "#"
     )[0];
 
-  domain =
-    domain.trim();
 
-  /*
-   * Remove accidental trailing dot.
-   */
   domain =
     domain.replace(
       /\.$/,
       ""
     );
 
-  return domain;
+
+  return domain.trim();
 }
+
+
+/* -------------------------------------------------------
+ * UNIQUE DOMAINS
+ * ----------------------------------------------------- */
 
 function uniqueDomains(
   items
 ) {
   const map =
     new Map();
+
 
   for (
     const item
@@ -1600,14 +1932,17 @@ function uniqueDomains(
       continue;
     }
 
+
     const domain =
       normalizeDomain(
         item.domain
       );
 
+
     if (!domain) {
       continue;
     }
+
 
     if (!map.has(domain)) {
       map.set(
@@ -1620,14 +1955,16 @@ function uniqueDomains(
     }
   }
 
+
   return Array.from(
     map.values()
   );
 }
 
-/* =========================================================
-   MATCH HELPERS
-========================================================= */
+
+/* -------------------------------------------------------
+ * MATCH HELPERS
+ * ----------------------------------------------------- */
 
 function collectMatches(
   text,
@@ -1635,14 +1972,14 @@ function collectMatches(
 ) {
   const matches = [];
 
+
   for (
     const pattern
     of patterns
   ) {
     const match =
-      text.match(
-        pattern
-      );
+      text.match(pattern);
+
 
     if (match) {
       matches.push(
@@ -1651,8 +1988,10 @@ function collectMatches(
     }
   }
 
+
   return matches;
 }
+
 
 function findMatches(
   text,
@@ -1660,14 +1999,14 @@ function findMatches(
 ) {
   const matches = [];
 
+
   for (
     const pattern
     of patterns
   ) {
     const match =
-      text.match(
-        pattern
-      );
+      text.match(pattern);
+
 
     if (match) {
       matches.push(
@@ -1676,8 +2015,14 @@ function findMatches(
     }
   }
 
+
   return matches;
 }
+
+
+/* -------------------------------------------------------
+ * UNIQUE STRINGS
+ * ----------------------------------------------------- */
 
 function uniqueStrings(
   items
@@ -1696,9 +2041,10 @@ function uniqueStrings(
   );
 }
 
-/* =========================================================
-   HTML ENTITY DECODER
-========================================================= */
+
+/* -------------------------------------------------------
+ * HTML ENTITIES
+ * ----------------------------------------------------- */
 
 function decodeHtmlEntities(
   value
@@ -1707,31 +2053,39 @@ function decodeHtmlEntities(
     return "";
   }
 
+
   return String(value)
+
     .replace(
       /&nbsp;/gi,
       " "
     )
+
     .replace(
       /&amp;/gi,
       "&"
     )
+
     .replace(
       /&quot;/gi,
       '"'
     )
+
     .replace(
       /&#39;|&apos;/gi,
       "'"
     )
+
     .replace(
       /&lt;/gi,
       "<"
     )
+
     .replace(
       /&gt;/gi,
       ">"
     )
+
     .replace(
       /&#(\d+);/g,
       (_, code) =>
@@ -1739,6 +2093,7 @@ function decodeHtmlEntities(
           Number(code)
         )
     )
+
     .replace(
       /&#x([0-9a-f]+);/gi,
       (_, code) =>
@@ -1751,9 +2106,10 @@ function decodeHtmlEntities(
     );
 }
 
-/* =========================================================
-   UINT8 ARRAY HELPER
-========================================================= */
+
+/* -------------------------------------------------------
+ * UINT8 ARRAY
+ * ----------------------------------------------------- */
 
 function combineUint8Arrays(
   arrays
@@ -1766,12 +2122,15 @@ function combineUint8Arrays(
       0
     );
 
+
   const result =
     new Uint8Array(
       total
     );
 
+
   let offset = 0;
+
 
   for (
     const array
@@ -1782,16 +2141,19 @@ function combineUint8Arrays(
       offset
     );
 
+
     offset +=
       array.byteLength;
   }
 
+
   return result;
 }
 
-/* =========================================================
-   CONCURRENCY
-========================================================= */
+
+/* -------------------------------------------------------
+ * CONCURRENCY
+ * ----------------------------------------------------- */
 
 async function runWithConcurrency(
   items,
@@ -1800,10 +2162,12 @@ async function runWithConcurrency(
 ) {
   let index = 0;
 
+
   async function runner() {
     while (true) {
       const current =
         index++;
+
 
       if (
         current >=
@@ -1812,24 +2176,27 @@ async function runWithConcurrency(
         return;
       }
 
+
       try {
         await worker(
           items[current]
         );
       } catch (error) {
         console.error(
-          "Worker error:",
+          "Scanner worker error:",
           error
         );
       }
     }
   }
 
+
   const workerCount =
     Math.min(
       concurrency,
       items.length
     );
+
 
   await Promise.all(
     Array.from(
@@ -1841,4 +2208,4 @@ async function runWithConcurrency(
         runner()
     )
   );
-}
+    }
