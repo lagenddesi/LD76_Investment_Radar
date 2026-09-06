@@ -1,7 +1,10 @@
-const MAX_DOMAINS = 150;
-const CONCURRENCY = 6;
-const REQUEST_TIMEOUT_MS = 8000;
-const MAX_HTML_BYTES = 700000;
+const MAX_DOMAINS = 50;
+const MAX_CANDIDATES = 30;
+const CONCURRENCY = 10;
+const REQUEST_TIMEOUT_MS = 3500;
+const MAX_HTML_BYTES = 300000;
+const MAX_TEXT_CHARS = 70000;
+const MAX_EXTRA_PAGES = 2;
 
 const INVESTMENT_PATTERNS = [
   /\binvest(?:ment|ing)?\b/i,
@@ -38,7 +41,7 @@ const ROI_PATTERNS = [
   /\b\d+(?:\.\d+)?\s*%\s*(?:roi|return)\b/i
 ];
 
-const PAKISTAN_PAYMENT_PATTERNS = {
+const PAYMENT_PATTERNS = {
   bank: [
     /\bbank transfer\b/i,
     /\bbank deposit\b/i,
@@ -68,14 +71,11 @@ const PAKISTAN_PAYMENT_PATTERNS = {
     /\bbitcoin\b/i,
     /\bethereum\b/i,
     /\bcrypto(?:currency)?\b/i,
-    /\bcrypto wallet\b/i,
-    /\bwallet address\b/i,
-    /\bpaypal\b/i
+    /\bwallet address\b/i
   ]
 };
 
-const PATHS = [
-  "/",
+const RELEVANT_PATHS = [
   "/about",
   "/about-us",
   "/contact",
@@ -104,15 +104,22 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    const inputDomains = Array.isArray(body.domains)
+    const input = Array.isArray(body.domains)
       ? body.domains
       : [];
 
-    const paymentMethods = normalizePaymentMethods(
+    const payments = normalizePayments(
       body.paymentMethods
     );
 
-    if (!inputDomains.length) {
+    const domains = uniqueDomains(
+      input
+        .slice(0, MAX_DOMAINS)
+        .map(normalizeInputDomain)
+        .filter(Boolean)
+    );
+
+    if (!domains.length) {
       return res.status(200).json({
         ok: true,
         scanned: 0,
@@ -124,70 +131,55 @@ export default async function handler(req, res) {
       });
     }
 
-    const domains = uniqueDomains(
-      inputDomains
-        .slice(0, MAX_DOMAINS)
-        .map(normalizeInputDomain)
-        .filter(Boolean)
-    );
-
-    const scanResults = [];
+    const results = [];
 
     await runWithConcurrency(
       domains,
       CONCURRENCY,
       async item => {
-        const result =
-          await scanDomain(item);
-
-        scanResults.push(result);
+        results.push(
+          await scanDomain(item)
+        );
       }
     );
 
-    const activeResults =
-      scanResults.filter(
-        result => result.status === "active"
-      );
+    const active = results.filter(
+      item => item.status === "active"
+    );
 
-    const investmentResults =
-      activeResults.filter(
-        result =>
-          result.investment.relevant === true
-      );
+    const investment = active.filter(
+      item => item.investment.relevant
+    );
 
-    const paymentResults =
-      investmentResults.filter(
-        result =>
-          hasSelectedPayment(
-            result.paymentMethods,
-            paymentMethods
-          )
-      );
+    const payment = investment.filter(
+      item =>
+        hasSelectedPayment(
+          item.paymentMethods,
+          payments
+        )
+    );
 
-    const transparencyCandidates =
-      paymentResults.filter(
-        result =>
-          result.transparency.candidate === true
-      );
+    const candidates = payment
+      .filter(
+        item =>
+          item.transparency.candidate
+      )
+      .sort(
+        (a, b) =>
+          b.investment.score -
+          a.investment.score
+      )
+      .slice(0, MAX_CANDIDATES);
 
     return res.status(200).json({
       ok: true,
-
       scanned: domains.length,
-
-      active: activeResults.length,
-
-      investmentMatches:
-        investmentResults.length,
-
-      paymentMatches:
-        paymentResults.length,
-
+      active: active.length,
+      investmentMatches: investment.length,
+      paymentMatches: payment.length,
       transparencyCandidates:
-        transparencyCandidates.length,
-
-      candidates:
-        transparencyCandidates
+        candidates.length,
+      candidates
     });
 
   } catch (error) {
@@ -198,38 +190,25 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       ok: false,
-      error: "Website scanning failed"
+      error: "Website scanning failed",
+      message:
+        error?.message ||
+        "Unknown error"
     });
   }
 }
 
-
-/* -------------------------------------------------- */
-/* DOMAIN SCANNING                                    */
-/* -------------------------------------------------- */
-
 async function scanDomain(input) {
-  const domain =
-    typeof input === "string"
-      ? input
-      : input.domain;
+  const domain = input.domain;
 
-  const discoveredAt =
-    typeof input === "object"
-      ? input.discoveredAt || null
-      : null;
-
-  const registeredAt =
-    typeof input === "object"
-      ? input.registeredAt || null
-      : null;
-
-  const baseResult = {
+  const result = {
     domain,
 
-    registeredAt,
+    registeredAt:
+      input.registeredAt || null,
 
-    discoveredAt,
+    discoveredAt:
+      input.discoveredAt || null,
 
     lastScanned:
       new Date().toISOString(),
@@ -288,201 +267,137 @@ async function scanDomain(input) {
     errors: []
   };
 
-  /*
-   * First check the homepage.
-   */
-  const homepage =
+  let page =
     await fetchPage(
       `https://${domain}/`
     );
 
-  if (!homepage.ok) {
-    /*
-     * Try HTTP as a fallback.
-     *
-     * An HTTP failure is NOT automatically
-     * treated as suspicious.
-     */
-    const httpPage =
+  if (!page.ok) {
+    page =
       await fetchPage(
         `http://${domain}/`
       );
-
-    if (!httpPage.ok) {
-      baseResult.errors =
-        [homepage.error, httpPage.error]
-          .filter(Boolean);
-
-      return baseResult;
-    }
-
-    return processPages(
-      baseResult,
-      httpPage,
-      domain
-    );
   }
 
-  return processPages(
-    baseResult,
-    homepage,
-    domain
-  );
-}
+  if (!page.ok) {
+    result.errors =
+      [page.error].filter(Boolean);
 
+    return result;
+  }
 
-/* -------------------------------------------------- */
-/* PAGE PROCESSING                                    */
-/* -------------------------------------------------- */
-
-async function processPages(
-  result,
-  homepage,
-  domain
-) {
   result.status = "active";
 
   result.httpStatus =
-    homepage.status;
+    page.status;
 
   result.finalUrl =
-    homepage.finalUrl;
+    page.finalUrl;
 
   result.redirects =
-    homepage.redirects;
+    page.redirects || [];
 
   result.https =
-    homepage.finalUrl
-      ? homepage.finalUrl
-          .startsWith("https://")
-      : true;
+    page.finalUrl
+      ?.startsWith("https://") ?? true;
 
-  result.technical.https =
-    result.https;
-
-  result.technical.status =
-    homepage.status;
-
-  result.technical.redirects =
-    homepage.redirects.length;
+  result.technical = {
+    https: result.https,
+    status: page.status,
+    redirects:
+      result.redirects.length
+  };
 
   result.title =
-    extractTitle(homepage.text);
+    extractTitle(page.text);
 
   result.websiteName =
-    extractWebsiteName(
-      result.title,
-      domain
-    );
+    result.title || domain;
 
   result.description =
     extractMetaDescription(
-      homepage.text
+      page.text
     );
 
-  /*
-   * Only follow a limited set of useful
-   * pages discovered from the homepage.
-   */
-  const discoveredLinks =
+  const extra =
     extractRelevantLinks(
-      homepage.text,
-      homepage.finalUrl || `https://${domain}`
+      page.text,
+      page.finalUrl ||
+        `https://${domain}`
+    ).slice(
+      0,
+      MAX_EXTRA_PAGES
     );
 
-  const urls = [
-    homepage.finalUrl ||
-      `https://${domain}`,
-    ...discoveredLinks
-  ];
+  const pages = [page];
 
-  const uniqueUrls =
-    Array.from(
-      new Set(urls)
-    ).slice(0, PATHS.length + 1);
-
-  const pages = [
-    homepage
-  ];
-
-  for (const url of uniqueUrls.slice(1)) {
-    const page =
+  for (const url of extra) {
+    const extraPage =
       await fetchPage(url);
 
-    if (!page.ok) {
-      continue;
+    if (extraPage.ok) {
+      pages.push(extraPage);
     }
-
-    pages.push(page);
   }
 
   result.pagesChecked =
     pages.map(
-      page => page.finalUrl
+      item => item.finalUrl
     );
 
-  /*
-   * Combine only bounded text.
-   */
-  const combinedText =
+  const text =
     pages
-      .map(page =>
-        extractUsefulText(
-          page.text
-        )
+      .map(
+        item =>
+          extractUsefulText(
+            item.text
+          )
       )
-      .join("\n\n")
-      .slice(0, 450000);
+      .join(" ")
+      .slice(
+        0,
+        MAX_TEXT_CHARS
+      );
 
-  result.content =
-    combinedText;
+  result.content = text;
 
   result.investment =
     analyzeInvestmentContent(
-      combinedText
+      text
     );
 
   result.paymentMethods =
     detectPaymentMethods(
-      combinedText
+      text
     );
 
   result.transparency =
     analyzeTransparency(
-      combinedText,
+      text,
       pages
     );
 
   result.snippets =
     extractRelevantSnippets(
-      combinedText
+      text
     );
 
-  /*
-   * A site must first look like an
-   * investment/earning website and also
-   * contain at least one selected payment
-   * signal before reaching the final list.
-   */
   result.transparency.candidate =
     result.investment.relevant &&
-    result.paymentMethods.detected.length > 0;
+    result.paymentMethods.detected
+      .length > 0;
 
   return result;
 }
-
-
-/* -------------------------------------------------- */
-/* HTTP FETCH                                         */
-/* -------------------------------------------------- */
 
 async function fetchPage(url) {
   const controller =
     new AbortController();
 
-  const timeout =
+  const timer =
     setTimeout(
-      () => controller.abort(),
+      () =>
+        controller.abort(),
       REQUEST_TIMEOUT_MS
     );
 
@@ -490,35 +405,36 @@ async function fetchPage(url) {
     const response =
       await fetch(url, {
         method: "GET",
-
         redirect: "follow",
-
         signal:
           controller.signal,
 
         headers: {
           "User-Agent":
             "Mozilla/5.0 (compatible; LD76-Investment-Radar/1.0)",
-          "Accept":
+
+          Accept:
             "text/html,application/xhtml+xml"
         }
       });
 
-    clearTimeout(timeout);
+    clearTimeout(timer);
 
-    const contentType =
+    const type =
       response.headers.get(
         "content-type"
       ) || "";
 
     if (
-      !contentType.includes("text/html") &&
-      !contentType.includes("application/xhtml+xml")
+      !type.includes("text/html") &&
+      !type.includes(
+        "application/xhtml+xml"
+      )
     ) {
       return {
         ok: false,
         error:
-          `Unsupported content type: ${contentType}`,
+          `Unsupported content type: ${type}`,
         status:
           response.status,
         finalUrl:
@@ -532,13 +448,17 @@ async function fetchPage(url) {
     if (!reader) {
       return {
         ok: false,
-        error: "Response body unavailable",
-        status: response.status,
-        finalUrl: response.url
+        error:
+          "Response body unavailable",
+        status:
+          response.status,
+        finalUrl:
+          response.url
       };
     }
 
     const chunks = [];
+
     let total = 0;
 
     while (true) {
@@ -547,13 +467,9 @@ async function fetchPage(url) {
         value
       } = await reader.read();
 
-      if (done) {
-        break;
-      }
+      if (done) break;
 
-      if (!value) {
-        continue;
-      }
+      if (!value) continue;
 
       total += value.length;
 
@@ -563,9 +479,7 @@ async function fetchPage(url) {
       ) {
         try {
           await reader.cancel();
-        } catch (error) {
-          // Ignore cancellation error.
-        }
+        } catch {}
 
         break;
       }
@@ -573,19 +487,8 @@ async function fetchPage(url) {
       chunks.push(value);
     }
 
-    const bytes =
-      combineUint8Arrays(
-        chunks
-      );
-
-    const text =
-      new TextDecoder(
-        "utf-8"
-      ).decode(bytes);
-
     return {
-      ok:
-        response.ok,
+      ok: response.ok,
 
       status:
         response.status,
@@ -595,11 +498,16 @@ async function fetchPage(url) {
 
       redirects: [],
 
-      text
+      text:
+        new TextDecoder(
+          "utf-8"
+        ).decode(
+          combine(chunks)
+        )
     };
 
   } catch (error) {
-    clearTimeout(timeout);
+    clearTimeout(timer);
 
     return {
       ok: false,
@@ -613,39 +521,30 @@ async function fetchPage(url) {
   }
 }
 
-
-/* -------------------------------------------------- */
-/* INVESTMENT ANALYSIS                                */
-/* -------------------------------------------------- */
-
-function analyzeInvestmentContent(
-  text
-) {
+function analyzeInvestmentContent(text) {
   const keywords = [];
 
   for (
     const pattern
     of INVESTMENT_PATTERNS
   ) {
-    const matches =
-      text.match(
-        pattern
-      );
+    const match =
+      text.match(pattern);
 
-    if (matches) {
+    if (match) {
       keywords.push(
-        matches[0]
+        match[0]
       );
     }
   }
 
-  const dailyReturnClaims =
+  const daily =
     collectMatches(
       text,
       DAILY_RETURN_PATTERNS
     );
 
-  const roiClaims =
+  const roi =
     collectMatches(
       text,
       ROI_PATTERNS
@@ -653,40 +552,29 @@ function analyzeInvestmentContent(
 
   let score = 0;
 
-  if (keywords.length > 0) {
+  if (keywords.length)
     score += 10;
-  }
 
-  if (
-    dailyReturnClaims.length
-  ) {
+  if (daily.length)
     score += 15;
-  }
 
-  if (
-    roiClaims.length
-  ) {
+  if (roi.length)
     score += 15;
-  }
 
   if (
     /\bdeposit\b/i.test(text)
-  ) {
+  )
     score += 10;
-  }
 
   if (
     /\bwithdraw(?:al)?\b/i.test(text)
-  ) {
+  )
     score += 10;
-  }
 
   if (
-    /\breferral\b|\baffiliate\b|\bcommission\b/i
-      .test(text)
-  ) {
+    /\breferral\b|\baffiliate\b|\bcommission\b/i.test(text)
+  )
     score += 10;
-  }
 
   return {
     relevant:
@@ -701,24 +589,17 @@ function analyzeInvestmentContent(
 
     dailyReturnClaims:
       uniqueStrings(
-        dailyReturnClaims
+        daily
       ).slice(0, 20),
 
     roiClaims:
       uniqueStrings(
-        roiClaims
+        roi
       ).slice(0, 20)
   };
 }
 
-
-/* -------------------------------------------------- */
-/* PAYMENT METHODS                                    */
-/* -------------------------------------------------- */
-
-function detectPaymentMethods(
-  text
-) {
+function detectPaymentMethods(text) {
   const result = {
     bank: false,
     easypaisa: false,
@@ -728,72 +609,37 @@ function detectPaymentMethods(
   };
 
   for (
-    const pattern
-    of PAKISTAN_PAYMENT_PATTERNS.bank
+    const type of Object.keys(
+      PAYMENT_PATTERNS
+    )
   ) {
-    if (pattern.test(text)) {
-      result.bank = true;
-      break;
-    }
+    result[type] =
+      PAYMENT_PATTERNS[type].some(
+        pattern =>
+          pattern.test(text)
+      );
   }
 
-  for (
-    const pattern
-    of PAKISTAN_PAYMENT_PATTERNS.easypaisa
-  ) {
-    if (pattern.test(text)) {
-      result.easypaisa = true;
-      break;
-    }
-  }
+  if (result.bank)
+    result.detected.push("Bank");
 
-  for (
-    const pattern
-    of PAKISTAN_PAYMENT_PATTERNS.jazzcash
-  ) {
-    if (pattern.test(text)) {
-      result.jazzcash = true;
-      break;
-    }
-  }
-
-  for (
-    const pattern
-    of PAKISTAN_PAYMENT_PATTERNS.crypto
-  ) {
-    if (pattern.test(text)) {
-      result.crypto = true;
-      break;
-    }
-  }
-
-  if (result.bank) {
-    result.detected.push(
-      "Bank"
-    );
-  }
-
-  if (result.easypaisa) {
+  if (result.easypaisa)
     result.detected.push(
       "Easypaisa"
     );
-  }
 
-  if (result.jazzcash) {
+  if (result.jazzcash)
     result.detected.push(
       "JazzCash"
     );
-  }
 
-  if (result.crypto) {
+  if (result.crypto)
     result.detected.push(
       "Crypto"
     );
-  }
 
   return result;
 }
-
 
 function hasSelectedPayment(
   detected,
@@ -803,41 +649,12 @@ function hasSelectedPayment(
     return true;
   }
 
-  if (
-    selected.includes("bank") &&
-    detected.bank
-  ) {
-    return true;
-  }
-
-  if (
-    selected.includes("easypaisa") &&
-    detected.easypaisa
-  ) {
-    return true;
-  }
-
-  if (
-    selected.includes("jazzcash") &&
-    detected.jazzcash
-  ) {
-    return true;
-  }
-
-  if (
-    selected.includes("crypto") &&
-    detected.crypto
-  ) {
-    return true;
-  }
-
-  return false;
+  return selected.some(
+    type => detected[type]
+  );
 }
 
-
-function normalizePaymentMethods(
-  value
-) {
+function normalizePayments(value) {
   if (!Array.isArray(value)) {
     return [
       "bank",
@@ -847,127 +664,68 @@ function normalizePaymentMethods(
   }
 
   return value
-    .map(item =>
-      String(item)
-        .trim()
-        .toLowerCase()
+    .map(
+      item =>
+        String(item)
+          .trim()
+          .toLowerCase()
     )
-    .filter(item =>
-      [
-        "bank",
-        "easypaisa",
-        "jazzcash",
-        "crypto"
-      ].includes(item)
+    .filter(
+      item =>
+        [
+          "bank",
+          "easypaisa",
+          "jazzcash",
+          "crypto"
+        ].includes(item)
     );
 }
-
-
-/* -------------------------------------------------- */
-/* TRANSPARENCY / SUPPORT                             */
-/* -------------------------------------------------- */
 
 function analyzeTransparency(
   text,
   pages
 ) {
-  const company = [];
-  const legal = [];
-  const support = [];
+  const company =
+    findMatches(text, [
+      /\bcompany\b/i,
+      /\bregistered\b/i,
+      /\bregistration number\b/i,
+      /\bhead office\b/i,
+      /\bphysical address\b/i,
+      /\bmanagement\b/i,
+      /\bteam\b/i,
+      /\bdirector\b/i
+    ]);
 
-  const companyPatterns = [
-    /\bcompany\b/i,
-    /\bregistered\b/i,
-    /\bregistration number\b/i,
-    /\bhead office\b/i,
-    /\bphysical address\b/i,
-    /\bmanagement\b/i,
-    /\bteam\b/i,
-    /\bdirector\b/i
-  ];
+  const legal =
+    findMatches(text, [
+      /\bprivacy policy\b/i,
+      /\bterms(?: and conditions)?\b/i,
+      /\brefund policy\b/i,
+      /\brisk disclosure\b/i,
+      /\blegal disclaimer\b/i,
+      /\bcookie policy\b/i
+    ]);
 
-  const legalPatterns = [
-    /\bprivacy policy\b/i,
-    /\bterms(?: and conditions)?\b/i,
-    /\brefund policy\b/i,
-    /\brisk disclosure\b/i,
-    /\blegal disclaimer\b/i,
-    /\bcookie policy\b/i
-  ];
+  const support =
+    findMatches(text, [
+      /\bsupport\b/i,
+      /\bcontact us\b/i,
+      /\bsupport@/i,
+      /\bhelp desk\b/i,
+      /\blive chat\b/i,
+      /\bticket\b/i,
+      /\bfaq\b/i,
+      /\btelegram\b/i,
+      /\bwhatsapp\b/i,
+      /\bdiscord\b/i
+    ]);
 
-  const supportPatterns = [
-    /\bsupport\b/i,
-    /\bcontact us\b/i,
-    /\bsupport@/i,
-    /\bhelp desk\b/i,
-    /\blive chat\b/i,
-    /\bticket\b/i,
-    /\bfaq\b/i,
-    /\btelegram\b/i,
-    /\bwhatsapp\b/i,
-    /\bdiscord\b/i
-  ];
-
-  for (
-    const pattern
-    of companyPatterns
-  ) {
-    const match =
-      text.match(pattern);
-
-    if (match) {
-      company.push(
-        match[0]
-      );
-    }
-  }
-
-  for (
-    const pattern
-    of legalPatterns
-  ) {
-    const match =
-      text.match(pattern);
-
-    if (match) {
-      legal.push(
-        match[0]
-      );
-    }
-  }
-
-  for (
-    const pattern
-    of supportPatterns
-  ) {
-    const match =
-      text.match(pattern);
-
-    if (match) {
-      support.push(
-        match[0]
-      );
-    }
-  }
-
-  /*
-   * A candidate means the site has enough
-   * investment/payment evidence to continue.
-   * Missing transparency is evidence for Gemini,
-   * not an automatic scam conclusion.
-   */
   return {
-    company:
-      uniqueStrings(company),
-
-    legal:
-      uniqueStrings(legal),
-
-    support:
-      uniqueStrings(support),
-
+    company,
+    legal,
+    support,
     candidate: false,
-
     pagesChecked:
       pages.map(
         page => page.finalUrl
@@ -975,14 +733,32 @@ function analyzeTransparency(
   };
 }
 
-
-/* -------------------------------------------------- */
-/* TEXT EXTRACTION                                    */
-/* -------------------------------------------------- */
-
-function extractUsefulText(
-  html
+function findMatches(
+  text,
+  patterns
 ) {
+  const result = [];
+
+  for (
+    const pattern
+    of patterns
+  ) {
+    const match =
+      text.match(pattern);
+
+    if (match) {
+      result.push(
+        match[0]
+      );
+    }
+  }
+
+  return uniqueStrings(
+    result
+  );
+}
+
+function extractUsefulText(html) {
   return String(html || "")
     .replace(
       /<script\b[^>]*>[\s\S]*?<\/script>/gi,
@@ -1025,28 +801,25 @@ function extractUsefulText(
       " "
     )
     .trim()
-    .slice(0, 120000);
+    .slice(
+      0,
+      40000
+    );
 }
 
-
-function extractTitle(
-  html
-) {
+function extractTitle(html) {
   const match =
     String(html || "")
       .match(
         /<title[^>]*>([\s\S]*?)<\/title>/i
       );
 
-  if (!match) {
-    return null;
-  }
-
-  return cleanText(
-    match[1]
-  ).slice(0, 200);
+  return match
+    ? cleanText(
+        match[1]
+      ).slice(0, 200)
+    : null;
 }
-
 
 function extractMetaDescription(
   html
@@ -1057,40 +830,27 @@ function extractMetaDescription(
         /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i
       );
 
-  if (!match) {
-    return null;
-  }
-
-  return cleanText(
-    match[1]
-  ).slice(0, 500);
+  return match
+    ? cleanText(
+        match[1]
+      ).slice(0, 500)
+    : null;
 }
-
-
-function extractWebsiteName(
-  title,
-  domain
-) {
-  if (title) {
-    return title;
-  }
-
-  return domain;
-}
-
-
-/* -------------------------------------------------- */
-/* LINK DISCOVERY                                     */
-/* -------------------------------------------------- */
 
 function extractRelevantLinks(
   html,
   baseUrl
 ) {
-  const results = [];
+  const result = [];
 
-  const base =
-    new URL(baseUrl);
+  let base;
+
+  try {
+    base =
+      new URL(baseUrl);
+  } catch {
+    return result;
+  }
 
   const pattern =
     /<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi;
@@ -1098,15 +858,13 @@ function extractRelevantLinks(
   let match;
 
   while (
-    (match = pattern.exec(html)) !== null
+    (match =
+      pattern.exec(html)) !== null
   ) {
-    const href =
-      match[1];
-
     try {
       const url =
         new URL(
-          href,
+          match[1],
           base.href
         );
 
@@ -1118,56 +876,52 @@ function extractRelevantLinks(
       }
 
       const path =
-        url.pathname
-          .toLowerCase();
+        url.pathname.toLowerCase();
 
-      const isRelevant =
-        PATHS.some(
+      if (
+        RELEVANT_PATHS.some(
           allowed =>
             path === allowed ||
             path.startsWith(
               allowed + "/"
             )
+        )
+      ) {
+        result.push(
+          url.href
         );
-
-      if (!isRelevant) {
-        continue;
       }
 
-      results.push(
-        url.href
-      );
-
-      if (results.length >= 15) {
+      if (
+        result.length >=
+        MAX_EXTRA_PAGES * 3
+      ) {
         break;
       }
 
-    } catch (error) {
-      // Ignore malformed links.
+    } catch {
+      // Ignore invalid links.
     }
   }
 
-  return results;
+  return [
+    ...new Set(result)
+  ];
 }
-
-
-/* -------------------------------------------------- */
-/* RELEVANT SNIPPETS                                  */
-/* -------------------------------------------------- */
 
 function extractRelevantSnippets(
   text
 ) {
-  const snippets = [];
+  const result = [];
 
   const patterns = [
     ...INVESTMENT_PATTERNS,
     ...DAILY_RETURN_PATTERNS,
     ...ROI_PATTERNS,
-    ...PAKISTAN_PAYMENT_PATTERNS.bank,
-    ...PAKISTAN_PAYMENT_PATTERNS.easypaisa,
-    ...PAKISTAN_PAYMENT_PATTERNS.jazzcash,
-    ...PAKISTAN_PAYMENT_PATTERNS.crypto
+    ...PAYMENT_PATTERNS.bank,
+    ...PAYMENT_PATTERNS.easypaisa,
+    ...PAYMENT_PATTERNS.jazzcash,
+    ...PAYMENT_PATTERNS.crypto
   ];
 
   for (
@@ -1177,129 +931,65 @@ function extractRelevantSnippets(
     const match =
       pattern.exec(text);
 
-    if (!match) {
-      continue;
-    }
+    if (!match) continue;
 
-    const index =
-      match.index;
-
-    const start =
-      Math.max(
-        0,
-        index - 140
-      );
-
-    const end =
-      Math.min(
-        text.length,
-        index + 260
-      );
-
-    snippets.push(
-      text
-        .slice(start, end)
-        .trim()
+    result.push(
+      text.slice(
+        Math.max(
+          0,
+          match.index - 120
+        ),
+        Math.min(
+          text.length,
+          match.index + 280
+        )
+      ).trim()
     );
 
-    if (snippets.length >= 25) {
+    if (
+      result.length >= 20
+    ) {
       break;
     }
   }
 
   return uniqueStrings(
-    snippets
+    result
   );
 }
-
 
 function collectMatches(
   text,
   patterns
 ) {
-  const matches = [];
+  const result = [];
 
   for (
     const pattern
     of patterns
   ) {
-    const found =
+    const flags =
+      pattern.flags.includes("g")
+        ? pattern.flags
+        : pattern.flags + "g";
+
+    const matches =
       text.match(
         new RegExp(
           pattern.source,
-          pattern.flags.includes("g")
-            ? pattern.flags
-            : pattern.flags + "g"
+          flags
         )
       );
 
-    if (found) {
-      matches.push(
-        ...found
+    if (matches) {
+      result.push(
+        ...matches
       );
     }
   }
 
-  return matches;
+  return result;
 }
-
-
-/* -------------------------------------------------- */
-/* CONCURRENCY                                        */
-/* -------------------------------------------------- */
-
-async function runWithConcurrency(
-  items,
-  limit,
-  worker
-) {
-  let index = 0;
-
-  async function runner() {
-    while (true) {
-      const current =
-        index++;
-
-      if (
-        current >= items.length
-      ) {
-        return;
-      }
-
-      try {
-        await worker(
-          items[current]
-        );
-      } catch (error) {
-        console.error(
-          "Worker error:",
-          error
-        );
-      }
-    }
-  }
-
-  const workers =
-    Array.from(
-      {
-        length:
-          Math.min(
-            limit,
-            items.length
-          )
-      },
-      () => runner()
-    );
-
-  await Promise.all(
-    workers
-  );
-}
-
-
-/* -------------------------------------------------- */
-/* HELPERS                                            */
-/* -------------------------------------------------- */
 
 function normalizeInputDomain(
   item
@@ -1316,17 +1006,17 @@ function normalizeInputDomain(
   let domain =
     String(source)
       .trim()
-      .toLowerCase();
-
-  domain =
-    domain
+      .toLowerCase()
       .replace(
         /^https?:\/\//,
         ""
       )
       .split("/")[0]
       .split(":")[0]
-      .replace(/^\*\./, "");
+      .replace(
+        /^\*\./,
+        ""
+      );
 
   if (
     !isValidDomain(domain)
@@ -1334,27 +1024,20 @@ function normalizeInputDomain(
     return null;
   }
 
-  if (
-    typeof item === "object"
-  ) {
-    return {
-      domain,
-      registeredAt:
-        item.registeredAt ||
-        null,
-      discoveredAt:
-        item.discoveredAt ||
-        null
-    };
-  }
-
   return {
     domain,
-    registeredAt: null,
-    discoveredAt: null
+
+    registeredAt:
+      typeof item === "object"
+        ? item.registeredAt || null
+        : null,
+
+    discoveredAt:
+      typeof item === "object"
+        ? item.discoveredAt || null
+        : null
   };
 }
-
 
 function uniqueDomains(
   items
@@ -1362,9 +1045,14 @@ function uniqueDomains(
   const map =
     new Map();
 
-  for (const item of items) {
+  for (
+    const item
+    of items
+  ) {
     if (
-      !map.has(item.domain)
+      !map.has(
+        item.domain
+      )
     ) {
       map.set(
         item.domain,
@@ -1373,11 +1061,10 @@ function uniqueDomains(
     }
   }
 
-  return Array.from(
-    map.values()
-  );
+  return [
+    ...map.values()
+  ];
 }
-
 
 function isValidDomain(
   domain
@@ -1398,35 +1085,19 @@ function isValidDomain(
     return false;
   }
 
-  for (
-    const label
-    of labels
-  ) {
-    if (
-      !label ||
-      label.length > 63 ||
-      label.startsWith("-") ||
-      label.endsWith("-")
-    ) {
-      return false;
-    }
-
-    if (
-      !/^[a-z0-9-]+$/i.test(
+  return labels.every(
+    label =>
+      label &&
+      label.length <= 63 &&
+      !label.startsWith("-") &&
+      !label.endsWith("-") &&
+      /^[a-z0-9-]+$/i.test(
         label
       )
-    ) {
-      return false;
-    }
-  }
-
-  return true;
+  );
 }
 
-
-function cleanText(
-  value
-) {
+function cleanText(value) {
   return String(value || "")
     .replace(
       /\s+/g,
@@ -1435,24 +1106,20 @@ function cleanText(
     .trim();
 }
 
-
 function uniqueStrings(
   values
 ) {
-  return Array.from(
-    new Set(
+  return [
+    ...new Set(
       values
         .map(cleanText)
         .filter(Boolean)
     )
-  );
+  ];
 }
 
-
-function combineUint8Arrays(
-  chunks
-) {
-  const totalLength =
+function combine(chunks) {
+  const total =
     chunks.reduce(
       (sum, chunk) =>
         sum + chunk.length,
@@ -1461,7 +1128,7 @@ function combineUint8Arrays(
 
   const result =
     new Uint8Array(
-      totalLength
+      total
     );
 
   let offset = 0;
@@ -1481,3 +1148,49 @@ function combineUint8Arrays(
 
   return result;
 }
+
+async function runWithConcurrency(
+  items,
+  limit,
+  worker
+) {
+  let index = 0;
+
+  async function runner() {
+    while (true) {
+      const current =
+        index++;
+
+      if (
+        current >=
+        items.length
+      ) {
+        return;
+      }
+
+      try {
+        await worker(
+          items[current]
+        );
+      } catch (error) {
+        console.error(
+          "Worker error:",
+          error
+        );
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      {
+        length:
+          Math.min(
+            limit,
+            items.length
+          )
+      },
+      () => runner()
+    )
+  );
+      }
