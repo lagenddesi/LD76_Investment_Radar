@@ -14,7 +14,7 @@ class ScanRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return FileResponse("ui.html",media_type="text/html")
+    return FileResponse("index.html",media_type="text/html")
 
 @app.get("/health")
 def health():
