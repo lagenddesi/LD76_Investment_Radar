@@ -3,29 +3,31 @@
 /*
  * LD76 INVESTMENT RADAR
  *
- * DISCOVERY v4
+ * DISCOVERY v5
  *
- * PRIMARY:
- *   Smet Newly Registered Domains JSON feed
+ * FLOW:
  *
- * SECONDARY:
- *   crt.sh Certificate Transparency
- *
- * FINAL AUTHORITY:
- *   RDAP registration event
+ * Smet NRD / crt.sh discovery
+ *        ↓
+ * TLD filter
+ *        ↓
+ * Investment / earning / finance / payment name filter
+ *        ↓
+ * Deduplicate
+ *        ↓
+ * RDAP registration-event verification
+ *        ↓
+ * Selected registration-date window
+ *        ↓
+ * Final candidates
  *
  * IMPORTANT:
- *   CT first-seen date is NEVER treated as registration date.
- *
- * A domain is returned only when:
- *
- *   1. It was discovered from a supported source
- *   2. Its TLD matches
- *   3. Its name passes the lightweight relevance filter
- *   4. RDAP returns a registration event
- *   5. RDAP registration date is inside 24H / 48H
- *
- * Every failure is returned as structured JSON.
+ * - Smet/CT discovery date is NOT treated as registration date.
+ * - RDAP registration event is required.
+ * - If RDAP registration date cannot be verified, domain is rejected.
+ * - No arbitrary 4/5/10 domain limit.
+ * - 1D / 3D / 7D / 15D / 1M are supported.
+ * - All failures are returned as structured JSON.
  */
 
 
@@ -35,21 +37,27 @@
 
 const SMET_TIMEOUT_MS = 12000;
 const CRT_TIMEOUT_MS = 12000;
-const RDAP_TIMEOUT_MS = 3500;
+const RDAP_TIMEOUT_MS = 4500;
 
 const SMET_RETRIES = 1;
 const CRT_RETRIES = 1;
 const RDAP_RETRIES = 1;
 
 /*
- * Keep enough concurrency to finish inside Vercel's
- * serverless execution window without hammering RDAP.
+ * Keep RDAP concurrency reasonable.
+ * Too much parallel RDAP traffic can trigger 429 responses.
  */
-const RDAP_CONCURRENCY = 20;
+const RDAP_CONCURRENCY = 12;
 
 /*
- * Stop doing new RDAP requests before Vercel's timeout.
- * Already-running requests are allowed to finish.
+ * Smet day feeds are fetched in small batches instead of
+ * launching 30+ requests at once for the 1-month period.
+ */
+const SMET_CONCURRENCY = 6;
+
+/*
+ * Keep enough time for RDAP and JSON response before
+ * Vercel's own timeout can generate a non-JSON error.
  */
 const DISCOVERY_BUDGET_MS = 70000;
 
@@ -58,14 +66,10 @@ const FUTURE_TOLERANCE_MS =
 
 
 /* =========================================================
- * SAFE JSON RESPONSE
+ * RESPONSE
  * ========================================================= */
 
-function sendJson(
-  res,
-  status,
-  payload
-) {
+function sendJson(res, status, payload) {
   try {
     res.status(status);
 
@@ -82,26 +86,15 @@ function sendJson(
     return res.json(payload);
 
   } catch (error) {
-    /*
-     * Last-resort fallback.
-     *
-     * This prevents Vercel from returning an HTML error page
-     * that the frontend cannot parse as JSON.
-     */
-
     try {
       return res
         .status(500)
         .end(
           JSON.stringify({
             ok: false,
-
-            stage:
-              "response",
-
+            stage: "response",
             error:
               "Failed to serialize discovery response",
-
             details:
               error?.message ||
               "Unknown response error"
@@ -131,23 +124,6 @@ function errorMessage(error) {
 }
 
 
-function errorDetails(
-  error,
-  extra = {}
-) {
-  return {
-    message:
-      errorMessage(error),
-
-    name:
-      error?.name ||
-      "Error",
-
-    ...extra
-  };
-}
-
-
 /* =========================================================
  * NORMALIZATION
  * ========================================================= */
@@ -173,7 +149,8 @@ function normalizeTld(value) {
     !tld.startsWith(".")
   ) {
     tld =
-      "." + tld;
+      "." +
+      tld;
   }
 
   if (
@@ -188,46 +165,123 @@ function normalizeTld(value) {
 }
 
 
+/*
+ * Supported frontend values:
+ *
+ * 1d
+ * 3d
+ * 7d
+ * 15d
+ * 1m
+ *
+ * Also accept old 24h / 48h values for compatibility.
+ */
 function normalizePeriod(body) {
-  if (
-    body?.periodHours !==
-    undefined
-  ) {
-    const hours =
-      Number(
-        body.periodHours
-      );
-
-    if (
-      hours === 24 ||
-      hours === 48
-    ) {
-      return hours;
-    }
-  }
-
-  const period =
+  const raw =
     String(
       body?.period ||
-      "24h"
+      ""
     )
       .trim()
       .toLowerCase();
 
   if (
-    period === "48h" ||
-    period === "48"
+    raw === "1d" ||
+    raw === "1day" ||
+    raw === "1-day" ||
+    raw === "24h" ||
+    raw === "24"
   ) {
-    return 48;
+    return {
+      key: "1d",
+      hours: 24,
+      days: 1
+    };
   }
 
-  return 24;
+  if (
+    raw === "3d" ||
+    raw === "3day" ||
+    raw === "3days" ||
+    raw === "3-day" ||
+    raw === "3-days"
+  ) {
+    return {
+      key: "3d",
+      hours: 72,
+      days: 3
+    };
+  }
+
+  if (
+    raw === "7d" ||
+    raw === "7day" ||
+    raw === "7days" ||
+    raw === "7-day" ||
+    raw === "7-days"
+  ) {
+    return {
+      key: "7d",
+      hours: 168,
+      days: 7
+    };
+  }
+
+  if (
+    raw === "15d" ||
+    raw === "15day" ||
+    raw === "15days" ||
+    raw === "15-day" ||
+    raw === "15-days"
+  ) {
+    return {
+      key: "15d",
+      hours: 360,
+      days: 15
+    };
+  }
+
+  if (
+    raw === "1m" ||
+    raw === "1month" ||
+    raw === "1-month" ||
+    raw === "30d" ||
+    raw === "30days"
+  ) {
+    return {
+      key: "1m",
+      hours: 720,
+      days: 30
+    };
+  }
+
+  /*
+   * Compatibility with the old app.js request format.
+   */
+  const hours =
+    Number(
+      body?.periodHours
+    );
+
+  if (
+    hours === 48
+  ) {
+    return {
+      key: "3d",
+      hours: 72,
+      days: 3
+    };
+  }
+
+  return {
+    key: "1d",
+    hours: 24,
+    days: 1
+  };
 }
 
 
-function normalizeDomain(
-  value
-) {
+function normalizeDomain(value) {
   if (
     typeof value !==
     "string"
@@ -257,7 +311,10 @@ function normalizeDomain(
       .split("/")[0]
       .split("?")[0]
       .split("#")[0]
-      .replace(/\.$/, "");
+      .replace(
+        /\.$/,
+        ""
+      );
 
   if (!domain) {
     return null;
@@ -298,12 +355,13 @@ function sleep(ms) {
 }
 
 
-function dateKeyUTC(
-  date
-) {
+function dateKeyUTC(date) {
   return date
     .toISOString()
-    .slice(0, 10);
+    .slice(
+      0,
+      10
+    );
 }
 
 
@@ -326,7 +384,7 @@ function addDaysUTC(
 
 
 /* =========================================================
- * HTTP FETCH
+ * HTTP
  * ========================================================= */
 
 async function fetchRaw(
@@ -349,15 +407,14 @@ async function fetchRaw(
       await fetch(
         url,
         {
-          method:
-            "GET",
+          method: "GET",
 
           headers: {
             Accept:
               "application/json,text/plain,*/*",
 
             "User-Agent":
-              "LD76-Investment-Radar/4.0",
+              "LD76-Investment-Radar/5.0",
 
             ...headers
           },
@@ -418,7 +475,8 @@ async function fetchWithRetry(
   retries,
   headers = {}
 ) {
-  let last = null;
+  let lastError =
+    null;
 
   for (
     let attempt = 0;
@@ -436,11 +494,6 @@ async function fetchWithRetry(
       if (
         !response.ok
       ) {
-        const error =
-          new Error(
-            `HTTP ${response.status}`
-          );
-
         return {
           ok: false,
 
@@ -466,7 +519,7 @@ async function fetchWithRetry(
             attempt + 1,
 
           error:
-            error.message
+            `HTTP ${response.status}`
         };
       }
 
@@ -490,11 +543,12 @@ async function fetchWithRetry(
         attempts:
           attempt + 1,
 
-        error: null
+        error:
+          null
       };
 
     } catch (error) {
-      last =
+      lastError =
         errorMessage(error);
 
       if (
@@ -526,15 +580,11 @@ async function fetchWithRetry(
       retries + 1,
 
     error:
-      last ||
+      lastError ||
       "Request failed"
   };
 }
 
-
-/* =========================================================
- * JSON HTTP
- * ========================================================= */
 
 async function fetchJson(
   url,
@@ -552,7 +602,9 @@ async function fetchJson(
       }
     );
 
-  if (!result.ok) {
+  if (
+    !result.ok
+  ) {
     return {
       ...result,
 
@@ -562,13 +614,22 @@ async function fetchJson(
     };
   }
 
-  let data;
-
   try {
-    data =
+    const data =
       JSON.parse(
         result.text
       );
+
+    return {
+      ...result,
+
+      ok: true,
+
+      data,
+
+      parseError:
+        null
+    };
 
   } catch (error) {
     return {
@@ -585,21 +646,11 @@ async function fetchJson(
         "Server returned non-JSON data"
     };
   }
-
-  return {
-    ...result,
-
-    ok: true,
-
-    data,
-
-    parseError: null
-  };
 }
 
 
 /* =========================================================
- * SMET
+ * SMET NRD
  * ========================================================= */
 
 function buildSmetJsonUrl(
@@ -628,7 +679,9 @@ async function fetchSmetDay(
       SMET_RETRIES
     );
 
-  if (!result.ok) {
+  if (
+    !result.ok
+  ) {
     return {
       ok: false,
 
@@ -668,17 +721,6 @@ async function fetchSmetDay(
     };
   }
 
-  /*
-   * Expected Smet shape:
-   *
-   * {
-   *   date,
-   *   count,
-   *   generated_at,
-   *   domains: [...]
-   * }
-   */
-
   const rawDomains =
     Array.isArray(
       result.data?.domains
@@ -690,7 +732,9 @@ async function fetchSmetDay(
         ? result.data
         : null;
 
-  if (!rawDomains) {
+  if (
+    !rawDomains
+  ) {
     return {
       ok: false,
 
@@ -774,29 +818,45 @@ async function fetchSmetDay(
 
 
 /* =========================================================
- * INVESTMENT NAME PREFILTER
- * ========================================================= */
+ * INVESTMENT / FINANCE NAME FILTER
+ * =========================================================
+ *
+ * This is intentionally broad.
+ *
+ * It is only a DISCOVERY prefilter.
+ * It is NOT the Gemini scam score.
+ */
 
-const INVESTMENT_NAME_PATTERNS = [
+const STRONG_INVESTMENT_PATTERNS = [
   "invest",
   "investment",
-  "investments",
+  "investor",
+  "investors",
+  "investing",
 
   "profit",
   "profits",
+  "profitable",
 
   "earning",
   "earnings",
+  "earner",
   "earn",
 
   "income",
+  "incomes",
 
   "roi",
   "return",
   "returns",
 
+  "yield",
+  "yields",
+
   "wealth",
+
   "capital",
+  "capitals",
 
   "finance",
   "financial",
@@ -805,16 +865,19 @@ const INVESTMENT_NAME_PATTERNS = [
   "fund",
   "funds",
   "funding",
+  "funded",
 
   "trading",
   "trade",
   "trader",
+  "traders",
 
   "forex",
   "fx",
 
   "crypto",
   "cryptocurrency",
+  "cryptos",
 
   "bitcoin",
   "btc",
@@ -823,70 +886,343 @@ const INVESTMENT_NAME_PATTERNS = [
   "eth",
 
   "usdt",
+  "tether",
+
+  "staking",
+  "stake",
 
   "mining",
   "miner",
+  "miners",
 
-  "stake",
-  "staking",
-
-  "yield",
-
+  "passiveincome",
   "passive",
 
-  "cash",
-  "money",
+  "deposit",
+  "deposits",
+
+  "withdraw",
+  "withdrawal",
+  "withdrawals",
+
+  "wallet",
+  "wallets",
+
+  "bonus",
+  "bonuses",
+
+  "referral",
+  "referrals",
+
+  "affiliate",
+  "affiliates",
+
+  "commission",
+  "commissions",
 
   "pay",
   "payment",
-
-  "deposit",
-  "withdraw",
-  "withdrawal",
-
-  "wallet",
-
-  "bonus",
-  "referral",
-  "affiliate",
+  "payments",
 
   "bank",
+  "banking",
 
   "loan",
   "loans",
 
   "asset",
-  "assets"
+  "assets",
+
+  "portfolio",
+  "portfolios",
+
+  "broker",
+  "brokers",
+
+  "exchange",
+  "exchanges",
+
+  "cash",
+
+  "money",
+
+  "profitshare",
+  "profitsharing",
+
+  "highyield",
+  "highreturn",
+
+  "fixedreturn",
+  "fixedprofit",
+
+  "dailyprofit",
+  "dailyincome",
+  "dailyreturn",
+  "dailyearning"
 ];
+
+
+const PAYMENT_PATTERNS = [
+  "easypaisa",
+  "easycash",
+
+  "jazzcash",
+  "jazzcash",
+
+  "sadapay",
+  "sada",
+
+  "nayapay",
+  "naya",
+
+  "pkr",
+  "pkrupee",
+  "rupee",
+  "rupees",
+
+  "pakistan",
+  "pakistani",
+
+  "iban",
+
+  "accountnumber",
+  "accounttitle",
+  "bankaccount",
+  "banktransfer",
+  "bankdeposit",
+
+  "usdt",
+  "trc20",
+  "erc20",
+  "bep20",
+
+  "bitcoin",
+  "btc",
+  "ethereum",
+  "eth",
+
+  "crypto",
+  "cryptowallet",
+
+  "paypal"
+];
+
+
+const HIGH_SIGNAL_PATTERNS = [
+  "dailyprofit",
+  "dailyincome",
+  "dailyreturn",
+  "dailyearning",
+
+  "highyield",
+  "highreturn",
+
+  "fixedprofit",
+  "fixedreturn",
+
+  "passiveincome",
+
+  "profitplan",
+  "investmentplan",
+  "investmentplans",
+
+  "earningplan",
+  "earningplans",
+
+  "referralbonus",
+  "affiliatebonus",
+
+  "depositbonus",
+  "withdrawal"
+];
+
+
+function compactDomainName(
+  domain
+) {
+  return domain
+    .split(".")
+    .slice(
+      0,
+      -1
+    )
+    .join("")
+    .replace(
+      /[-_]/g,
+      ""
+    )
+    .toLowerCase();
+}
+
+
+function getDomainNameSignals(
+  domain
+) {
+  const name =
+    compactDomainName(
+      domain
+    );
+
+  const strongMatches =
+    STRONG_INVESTMENT_PATTERNS
+      .filter(
+        keyword =>
+          name.includes(
+            keyword
+          )
+      );
+
+  const paymentMatches =
+    PAYMENT_PATTERNS
+      .filter(
+        keyword =>
+          name.includes(
+            keyword
+          )
+      );
+
+  const highSignalMatches =
+    HIGH_SIGNAL_PATTERNS
+      .filter(
+        keyword =>
+          name.includes(
+            keyword
+          )
+      );
+
+  return {
+    name,
+
+    strongMatches:
+      [
+        ...new Set(
+          strongMatches
+        )
+      ],
+
+    paymentMatches:
+      [
+        ...new Set(
+          paymentMatches
+        )
+      ],
+
+    highSignalMatches:
+      [
+        ...new Set(
+          highSignalMatches
+        )
+      ]
+  };
+}
 
 
 function investmentNameMatch(
   domain
 ) {
-  const labels =
-    domain
-      .split(".")
-      .slice(
-        0,
-        -1
-      )
-      .join(".")
-      .replace(
-        /[-_]/g,
-        ""
-      )
-      .toLowerCase();
+  const signals =
+    getDomainNameSignals(
+      domain
+    );
 
-  return INVESTMENT_NAME_PATTERNS.some(
-    keyword =>
-      labels.includes(
-        keyword
-          .replace(
-            /[-_]/g,
-            ""
-          )
-      )
+  /*
+   * Any direct investment/earning/finance
+   * term is enough for discovery.
+   */
+  if (
+    signals.strongMatches
+      .length > 0
+  ) {
+    return true;
+  }
+
+  /*
+   * Payment terms alone are generally too broad,
+   * so require at least two payment-related signals.
+   */
+  if (
+    signals.paymentMatches
+      .length >= 2
+  ) {
+    return true;
+  }
+
+  /*
+   * High-signal phrases always pass.
+   */
+  if (
+    signals.highSignalMatches
+      .length > 0
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+
+/* =========================================================
+ * CONCURRENT MAP HELPER
+ * ========================================================= */
+
+async function mapConcurrent(
+  items,
+  concurrency,
+  worker
+) {
+  const results =
+    new Array(
+      items.length
+    );
+
+  let nextIndex = 0;
+
+  async function runner() {
+    while (true) {
+      const index =
+        nextIndex++;
+
+      if (
+        index >=
+        items.length
+      ) {
+        return;
+      }
+
+      try {
+        results[index] =
+          await worker(
+            items[index],
+            index
+          );
+      } catch (error) {
+        results[index] = {
+          ok: false,
+
+          error:
+            errorMessage(error)
+        };
+      }
+    }
+  }
+
+  const count =
+    Math.min(
+      concurrency,
+      items.length
+    );
+
+  await Promise.all(
+    Array.from(
+      {
+        length:
+          count
+      },
+      runner
+    )
   );
+
+  return results;
 }
 
 
@@ -894,79 +1230,84 @@ function investmentNameMatch(
  * SMET DISCOVERY
  * ========================================================= */
 
-async function discoverFromSmet(
-  tld,
-  periodHours
+function buildRequestedDates(
+  days
 ) {
   const now =
     new Date();
 
-  const dates = [
-    dateKeyUTC(now),
+  const dates = [];
 
-    dateKeyUTC(
-      addDaysUTC(
-        now,
-        -1
-      )
-    )
-  ];
-
-  /*
-   * For 48H include the day before yesterday.
-   */
-
-  if (
-    periodHours === 48
+  for (
+    let offset = 0;
+    offset < days;
+    offset++
   ) {
     dates.push(
       dateKeyUTC(
         addDaysUTC(
           now,
-          -2
+          -offset
         )
       )
     );
   }
 
-  const sourceResults = [];
+  return dates;
+}
 
-  /*
-   * Fetch the days in parallel.
-   */
 
-  const results =
-    await Promise.all(
-      dates.map(
-        date =>
-          fetchSmetDay(
-            date
-          )
-      )
+async function discoverFromSmet(
+  tld,
+  period
+) {
+  const dates =
+    buildRequestedDates(
+      period.days
     );
 
-  sourceResults.push(
-    ...results
-  );
+  const results =
+    await mapConcurrent(
+      dates,
+      SMET_CONCURRENCY,
+      date =>
+        fetchSmetDay(
+          date
+        )
+    );
 
   const successful =
     results.filter(
       item =>
-        item.ok
+        item?.ok ===
+        true
     );
 
   if (
-    successful.length === 0
+    successful.length ===
+    0
   ) {
     return {
       ok: false,
 
       candidates: [],
 
-      sourceResults,
+      sourceResults:
+        results,
 
       error:
-        "Smet newly-registered feed failed for every requested day"
+        "Smet newly-observed domain feed failed for every requested day",
+
+      statistics: {
+        requestedDays:
+          dates.length,
+
+        successfulDays:
+          0,
+
+        failedDays:
+          results.length
+      }
     };
   }
 
@@ -988,18 +1329,14 @@ async function discoverFromSmet(
       totalFeedDomains++;
 
       if (
-        !domain.endsWith(tld)
+        !domain.endsWith(
+          tld
+        )
       ) {
         continue;
       }
 
       tldMatches++;
-
-      /*
-       * Lightweight filter.
-       *
-       * This is NOT the final scam/investment filter.
-       */
 
       if (
         !investmentNameMatch(
@@ -1012,7 +1349,9 @@ async function discoverFromSmet(
       nameMatches++;
 
       if (
-        !map.has(domain)
+        !map.has(
+          domain
+        )
       ) {
         map.set(
           domain,
@@ -1024,13 +1363,18 @@ async function discoverFromSmet(
                 .toISOString(),
 
             discoveryEvidence:
-              "smet-newly-registered-feed",
+              "smet-newly-observed-domain-feed",
 
             discoverySource:
               source.url,
 
             feedDate:
-              source.date
+              source.date,
+
+            nameSignals:
+              getDomainNameSignals(
+                domain
+              )
           }
         );
       }
@@ -1041,15 +1385,22 @@ async function discoverFromSmet(
     ok: true,
 
     candidates:
-      [...map.values()],
+      [
+        ...map.values()
+      ],
 
-    sourceResults,
+    sourceResults:
+      results,
 
     statistics: {
       requestedDays:
         dates.length,
 
       successfulDays:
+        successful.length,
+
+      failedDays:
+        results.length -
         successful.length,
 
       totalFeedDomains,
@@ -1075,9 +1426,13 @@ function buildCrtUrl(
   tld
 ) {
   /*
-   * crt.sh wildcard query.
+   * IMPORTANT:
+   *
+   * Use %.top / %.xyz etc.
+   * encodeURIComponent() is called exactly once.
+   *
+   * This prevents the previous %25.top double-encoding bug.
    */
-
   const query =
     `%${tld}`;
 
@@ -1106,7 +1461,9 @@ async function queryCrtSh(
       CRT_RETRIES
     );
 
-  if (!result.ok) {
+  if (
+    !result.ok
+  ) {
     return {
       ok: false,
 
@@ -1219,7 +1576,9 @@ function getCtDate(
     }
 
     const date =
-      new Date(value);
+      new Date(
+        value
+      );
 
     if (
       !Number.isNaN(
@@ -1285,7 +1644,9 @@ function collectCtCandidates(
     of rows
   ) {
     const date =
-      getCtDate(row);
+      getCtDate(
+        row
+      );
 
     if (!date) {
       continue;
@@ -1299,7 +1660,9 @@ function collectCtCandidates(
     }
 
     const names =
-      getCtNames(row);
+      getCtNames(
+        row
+      );
 
     for (
       const rawName
@@ -1315,7 +1678,9 @@ function collectCtCandidates(
       }
 
       if (
-        !domain.endsWith(tld)
+        !domain.endsWith(
+          tld
+        )
       ) {
         continue;
       }
@@ -1329,7 +1694,9 @@ function collectCtCandidates(
       }
 
       if (
-        !map.has(domain)
+        !map.has(
+          domain
+        )
       ) {
         map.set(
           domain,
@@ -1343,7 +1710,12 @@ function collectCtCandidates(
               "certificate-transparency",
 
             discoverySource:
-              "crt.sh"
+              "crt.sh",
+
+            nameSignals:
+              getDomainNameSignals(
+                domain
+              )
           }
         );
       }
@@ -1410,11 +1782,6 @@ async function verifyRegistration(
   cutoff,
   scanDeadline
 ) {
-  /*
-   * Don't start a new request if the overall scan is
-   * already approaching the Vercel execution limit.
-   */
-
   if (
     Date.now() >=
     scanDeadline
@@ -1449,7 +1816,9 @@ async function verifyRegistration(
       RDAP_RETRIES
     );
 
-  if (!result.ok) {
+  if (
+    !result.ok
+  ) {
     return {
       domain,
 
@@ -1497,7 +1866,9 @@ async function verifyRegistration(
       result.data
     );
 
-  if (!registeredAt) {
+  if (
+    !registeredAt
+  ) {
     return {
       domain,
 
@@ -1571,66 +1942,104 @@ async function verifyRegistration(
 }
 
 
-/* =========================================================
- * CONCURRENT RDAP
- * ========================================================= */
-
 async function verifyCandidates(
   candidates,
   cutoff,
   scanDeadline
 ) {
-  const results =
-    new Array(
-      candidates.length
+  return mapConcurrent(
+    candidates,
+    RDAP_CONCURRENCY,
+    candidate =>
+      verifyRegistration(
+        candidate.domain,
+        cutoff,
+        scanDeadline
+      )
+  );
+}
+
+
+/* =========================================================
+ * MERGE CANDIDATES
+ * ========================================================= */
+
+function mergeCandidates(
+  smetCandidates,
+  ctCandidates
+) {
+  const merged =
+    new Map();
+
+  for (
+    const candidate
+    of smetCandidates
+  ) {
+    merged.set(
+      candidate.domain,
+      {
+        ...candidate
+      }
+    );
+  }
+
+  for (
+    const candidate
+    of ctCandidates
+  ) {
+    const existing =
+      merged.get(
+        candidate.domain
+      );
+
+    if (
+      !existing
+    ) {
+      merged.set(
+        candidate.domain,
+        {
+          ...candidate
+        }
+      );
+
+      continue;
+    }
+
+    const evidence =
+      new Set(
+        String(
+          existing.discoveryEvidence ||
+          ""
+        )
+          .split("+")
+          .filter(Boolean)
+      );
+
+    evidence.add(
+      "certificate-transparency"
     );
 
-  let nextIndex = 0;
+    existing.discoveryEvidence =
+      [
+        ...evidence
+      ].join("+");
 
-  async function worker() {
-    while (true) {
-      const index =
-        nextIndex++;
-
-      if (
-        index >=
-        candidates.length
-      ) {
-        return;
-      }
-
-      results[index] =
-        await verifyRegistration(
-          candidates[index].domain,
-          cutoff,
-          scanDeadline
-        );
+    /*
+     * Prefer CT timestamp when Smet does not have
+     * a useful timestamp.
+     */
+    if (
+      !existing.discoveredAt &&
+      candidate.discoveredAt
+    ) {
+      existing.discoveredAt =
+        candidate.discoveredAt;
     }
   }
 
-  const workerCount =
-    Math.min(
-      RDAP_CONCURRENCY,
-      candidates.length
-    );
-
-  if (
-    workerCount === 0
-  ) {
-    return [];
-  }
-
-  await Promise.all(
-    Array.from(
-      {
-        length:
-          workerCount
-      },
-      worker
-    )
-  );
-
-  return results;
+  return [
+    ...merged.values()
+  ];
 }
 
 
@@ -1644,10 +2053,6 @@ export default async function handler(
 ) {
   const requestStarted =
     Date.now();
-
-  /*
-   * Always return JSON, even for bad methods.
-   */
 
   if (
     req.method !==
@@ -1675,7 +2080,8 @@ export default async function handler(
 
   try {
     const body =
-      req.body || {};
+      req.body ||
+      {};
 
     const tld =
       normalizeTld(
@@ -1683,7 +2089,7 @@ export default async function handler(
         body.tldValue
       );
 
-    const periodHours =
+    const period =
       normalizePeriod(
         body
       );
@@ -1716,15 +2122,10 @@ export default async function handler(
 
     const cutoff =
       now -
-      periodHours *
+      period.hours *
       60 *
       60 *
       1000;
-
-    /*
-     * Stop discovery/RDAP before Vercel can produce
-     * its own non-JSON 504 page.
-     */
 
     const scanDeadline =
       requestStarted +
@@ -1738,16 +2139,20 @@ export default async function handler(
     const smet =
       await discoverFromSmet(
         tld,
-        periodHours
+        period
       );
 
 
     /* =====================================================
      * CRT SECONDARY
-     *
-     * CRT failure is NEVER fatal when Smet works.
      * ===================================================== */
 
+    /*
+     * CRT failure is NEVER fatal if Smet succeeded.
+     *
+     * For a one-month scan CRT can be large/slow,
+     * but it remains a useful secondary source.
+     */
     const crt =
       await queryCrtSh(
         tld
@@ -1767,51 +2172,13 @@ export default async function handler(
      * MERGE
      * ===================================================== */
 
-    const merged =
-      new Map();
-
-    if (smet.ok) {
-      for (
-        const candidate
-        of smet.candidates
-      ) {
-        merged.set(
-          candidate.domain,
-          {
-            ...candidate
-          }
-        );
-      }
-    }
-
-    for (
-      const candidate
-      of ctCandidates
-    ) {
-      const existing =
-        merged.get(
-          candidate.domain
-        );
-
-      if (!existing) {
-        merged.set(
-          candidate.domain,
-          {
-            ...candidate
-          }
-        );
-
-      } else {
-        existing.discoveryEvidence =
-          existing.discoveryEvidence +
-          "+certificate-transparency";
-      }
-    }
-
     const discoveryCandidates =
-      [
-        ...merged.values()
-      ];
+      mergeCandidates(
+        smet.ok
+          ? smet.candidates
+          : [],
+        ctCandidates
+      );
 
 
     /* =====================================================
@@ -1841,7 +2208,14 @@ export default async function handler(
 
             tld,
 
-            periodHours,
+            period:
+              period.key,
+
+            periodHours:
+              period.hours,
+
+            periodDays:
+              period.days,
 
             sources: {
               smet: {
@@ -1890,8 +2264,6 @@ export default async function handler(
 
     /* =====================================================
      * NO DISCOVERY CANDIDATES
-     *
-     * This is NOT an error.
      * ===================================================== */
 
     if (
@@ -1909,14 +2281,22 @@ export default async function handler(
 
           tld,
 
-          periodHours,
+          period:
+            period.key,
+
+          periodHours:
+            period.hours,
+
+          periodDays:
+            period.days,
 
           cutoff:
             new Date(
               cutoff
             ).toISOString(),
 
-          discovered: 0,
+          discovered:
+            0,
 
           registrationVerified:
             0,
@@ -1997,7 +2377,7 @@ export default async function handler(
 
 
     /* =====================================================
-     * RDAP
+     * RDAP REGISTRATION VERIFICATION
      * ===================================================== */
 
     const rdapResults =
@@ -2006,7 +2386,6 @@ export default async function handler(
         cutoff,
         scanDeadline
       );
-
 
     const verified =
       rdapResults.filter(
@@ -2042,6 +2421,72 @@ export default async function handler(
 
 
     /* =====================================================
+     * FINAL CANDIDATES
+     * ===================================================== */
+
+    const discoveryMap =
+      new Map(
+        discoveryCandidates.map(
+          candidate => [
+            candidate.domain,
+            candidate
+          ]
+        )
+      );
+
+    const final =
+      finalCandidates.map(
+        item => {
+          const discovery =
+            discoveryMap.get(
+              item.domain
+            );
+
+          return {
+            domain:
+              item.domain,
+
+            discoveredAt:
+              discovery
+                ?.discoveredAt ||
+              null,
+
+            registeredAt:
+              item.registeredAt,
+
+            registrationVerified:
+              true,
+
+            registrationInWindow:
+              true,
+
+            discoveryEvidence:
+              discovery
+                ?.discoveryEvidence ||
+              null,
+
+            discoverySource:
+              discovery
+                ?.discoverySource ||
+              null,
+
+            feedDate:
+              discovery
+                ?.feedDate ||
+              null,
+
+            nameSignals:
+              discovery
+                ?.nameSignals ||
+              getDomainNameSignals(
+                item.domain
+              )
+          };
+        }
+      );
+
+
+    /* =====================================================
      * RETURN
      * ===================================================== */
 
@@ -2056,7 +2501,14 @@ export default async function handler(
 
         tld,
 
-        periodHours,
+        period:
+          period.key,
+
+        periodHours:
+          period.hours,
+
+        periodDays:
+          period.days,
 
         cutoff:
           new Date(
@@ -2067,7 +2519,7 @@ export default async function handler(
           discoveryCandidates.length,
 
         registrationVerified:
-          finalCandidates.length,
+          final.length,
 
         registrationRejected:
           outsideWindow.length,
@@ -2076,45 +2528,7 @@ export default async function handler(
           failed.length,
 
         candidates:
-          finalCandidates.map(
-            item => ({
-              domain:
-                item.domain,
-
-              discoveredAt:
-                discoveryCandidates.find(
-                  candidate =>
-                    candidate.domain ===
-                    item.domain
-                )?.discoveredAt ||
-                null,
-
-              registeredAt:
-                item.registeredAt,
-
-              registrationVerified:
-                true,
-
-              registrationInWindow:
-                true,
-
-              discoveryEvidence:
-                discoveryCandidates.find(
-                  candidate =>
-                    candidate.domain ===
-                    item.domain
-                )?.discoveryEvidence ||
-                null,
-
-              discoverySource:
-                discoveryCandidates.find(
-                  candidate =>
-                    candidate.domain ===
-                    item.domain
-                )?.discoverySource ||
-                null
-            })
-          ),
+          final,
 
         sources: {
           smet: {
@@ -2186,7 +2600,7 @@ export default async function handler(
             verified.length,
 
           registrationConfirmed:
-            finalCandidates.length,
+            final.length,
 
           outsideSelectedPeriod:
             outsideWindow.length,
@@ -2210,7 +2624,10 @@ export default async function handler(
 
           rdapFailures:
             failed
-              .slice(0, 50)
+              .slice(
+                0,
+                50
+              )
               .map(
                 item => ({
                   domain:
@@ -2226,18 +2643,31 @@ export default async function handler(
                     item.diagnostic ||
                     null
                 })
+              ),
+
+          outsideWindow:
+            outsideWindow
+              .slice(
+                0,
+                50
+              )
+              .map(
+                item => ({
+                  domain:
+                    item.domain,
+
+                  registeredAt:
+                    item.registeredAt,
+
+                  reason:
+                    item.reason
+                })
               )
         }
       }
     );
 
   } catch (error) {
-    /*
-     * CRITICAL:
-     * Never allow an exception to become a Vercel HTML
-     * error page. Always return structured JSON.
-     */
-
     console.error(
       "LD76 DISCOVERY FATAL ERROR",
       error
@@ -2253,7 +2683,9 @@ export default async function handler(
           "discovery",
 
         error:
-          errorMessage(error),
+          errorMessage(
+            error
+          ),
 
         diagnostic: {
           errorName:
@@ -2274,4 +2706,4 @@ export default async function handler(
       }
     );
   }
-  }
+            }
