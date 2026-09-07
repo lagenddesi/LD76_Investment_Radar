@@ -1,6 +1,7 @@
 import threading
 import uuid
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from detector import detect_investment
 
@@ -11,11 +12,13 @@ FEEDS = {
     7: "https://smet.cz/nrd/data/7d.txt",
 }
 
-SCANS = {}
+
+MAX_DOMAINS = 500
+MAX_WORKERS = 40
 
 
 def _fetch(url):
-    req = urllib.request.Request(
+    request = urllib.request.Request(
         url,
         headers={
             "User-Agent": "LD76-Investment-Radar/1.0",
@@ -23,11 +26,14 @@ def _fetch(url):
         },
     )
 
-    with urllib.request.urlopen(req, timeout=60) as response:
-        return response.read().decode("utf-8", "ignore")
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return response.read().decode(
+            "utf-8",
+            "ignore",
+        )
 
 
-def _domains(period):
+def _domains(period, tld):
     period = int(period)
 
     if period not in FEEDS:
@@ -36,6 +42,11 @@ def _domains(period):
     data = _fetch(FEEDS[period])
 
     domains = []
+
+    suffix = None
+
+    if tld and tld != "all":
+        suffix = "." + str(tld).lstrip(".").lower()
 
     for line in data.splitlines():
         domain = line.strip().lower()
@@ -49,146 +60,104 @@ def _domains(period):
         if "." not in domain:
             continue
 
+        if suffix and not domain.endswith(suffix):
+            continue
+
         domains.append(domain)
+
+        if len(domains) >= MAX_DOMAINS:
+            break
 
     return list(dict.fromkeys(domains))
 
 
-def _run(scan_id, period, tld):
-    scan = SCANS[scan_id]
-
+def _scan_one(domain):
     try:
-        scan.update(
-            status="downloading",
-            progress=0,
-            message="Downloading newly registered domains..."
-        )
-
-        domains = _domains(period)
-
-        if tld != "all":
-            suffix = "." + tld.lstrip(".")
-
-            domains = [
-                domain
-                for domain in domains
-                if domain.endswith(suffix)
-            ]
-
-        total = len(domains)
-
-        scan.update(
-            total=total,
-            status="scanning",
-            progress=0,
-            checked=0,
-            found=0,
-            message="Scanning domains..."
-        )
-
-        if total == 0:
-            scan.update(
-                progress=100,
-                status="completed",
-                done=True,
-                checked=0,
-                found=0,
-                results=[],
-                message="No domains found for this selection."
-            )
-            return
-
-        for index, domain in enumerate(domains, start=1):
-
-            try:
-                result = detect_investment(domain)
-
-                if result:
-                    scan["results"].append(result)
-                    scan["found"] = len(scan["results"])
-
-            except Exception:
-                pass
-
-            progress = int((index / total) * 100)
-
-            scan.update(
-                checked=index,
-                progress=progress,
-                status="scanning",
-                message=f"Scanning {index}/{total}"
-            )
-
-        scan.update(
-            progress=100,
-            status="completed",
-            done=True,
-            checked=total,
-            found=len(scan["results"]),
-            message="Scan completed."
-        )
-
-    except Exception as exc:
-
-        scan.update(
-            status="error",
-            done=True,
-            progress=100,
-            message="Scanner failed.",
-            error=str(exc)
-        )
+        return detect_investment(domain)
+    except Exception:
+        return None
 
 
 def scan_domains(period=1, tld="all"):
-    try:
-        period = int(period)
-    except Exception:
-        period = 1
-
-    if period not in FEEDS:
-        period = 1
-
-    tld = str(tld or "all").strip().lower()
-
     scan_id = uuid.uuid4().hex
 
-    SCANS[scan_id] = {
-        "scan_id": scan_id,
-        "status": "starting",
-        "message": "Starting scan...",
-        "progress": 0,
-        "total": 0,
-        "checked": 0,
-        "found": 0,
-        "results": [],
-        "done": False,
-    }
+    try:
+        domains = _domains(
+            period,
+            tld,
+        )
 
-    thread = threading.Thread(
-        target=_run,
-        args=(scan_id, period, tld),
-        daemon=True,
-    )
+        total = len(domains)
 
-    thread.start()
+        if total == 0:
+            return {
+                "scan_id": scan_id,
+                "status": "completed",
+                "message": "No newly registered domains found.",
+                "total": 0,
+                "checked": 0,
+                "found": 0,
+                "results": [],
+            }
 
-    return scan_id
+        results = []
+        checked = 0
 
+        workers = min(
+            MAX_WORKERS,
+            max(1, total),
+        )
 
-def get_scan(scan_id):
-    scan = SCANS.get(scan_id)
+        with ThreadPoolExecutor(
+            max_workers=workers
+        ) as executor:
 
-    if scan is None:
+            futures = {
+                executor.submit(
+                    _scan_one,
+                    domain,
+                ): domain
+                for domain in domains
+            }
+
+            for future in as_completed(futures):
+                checked += 1
+
+                try:
+                    result = future.result()
+
+                    if result:
+                        results.append(result)
+
+                except Exception:
+                    pass
+
+        results.sort(
+            key=lambda item: item.get(
+                "score",
+                0,
+            ),
+            reverse=True,
+        )
+
         return {
             "scan_id": scan_id,
-            "status": "not_found",
-            "message": "Scan not found.",
-            "progress": 0,
+            "status": "completed",
+            "message": "Scan completed.",
+            "total": total,
+            "checked": checked,
+            "found": len(results),
+            "results": results,
+        }
+
+    except Exception as exc:
+        return {
+            "scan_id": scan_id,
+            "status": "error",
+            "message": "Scanner failed.",
+            "error": str(exc),
             "total": 0,
             "checked": 0,
             "found": 0,
             "results": [],
-            "done": True,
         }
-
-    return scan
