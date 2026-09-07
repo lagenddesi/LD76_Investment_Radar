@@ -1,10 +1,12 @@
-
 import re
 import urllib.request
 from html import unescape
 
 
 POS = {
+    "investment": 6,
+    "invest": 5,
+    "investing": 5,
     "investment plan": 10,
     "investment package": 10,
     "minimum investment": 9,
@@ -51,18 +53,33 @@ POS = {
     "minimum deposit": 7,
     "minimum withdrawal": 5,
     "withdraw profit": 8,
+    "trading platform": 7,
+    "trading account": 6,
+    "forex": 6,
+    "crypto investment": 9,
+    "cloud mining": 9,
+    "staking": 7,
+    "liquidity pool": 7,
+    "defi": 7,
 }
 
 
 PAY = [
     "usdt",
+    "usdc",
     "btc",
+    "bitcoin",
     "eth",
+    "ethereum",
     "trx",
+    "crypto",
+    "cryptocurrency",
     "bank transfer",
     "wallet",
     "deposit",
     "withdraw",
+    "withdrawal",
+    "payment",
 ]
 
 
@@ -70,10 +87,49 @@ ACC = [
     "signup",
     "sign up",
     "register",
+    "registration",
     "login",
     "referral",
     "referral code",
     "invite link",
+    "create account",
+    "open account",
+]
+
+
+MONEY = [
+    "deposit",
+    "minimum deposit",
+    "minimum investment",
+    "investment amount",
+    "profit",
+    "profit percentage",
+    "profit rate",
+    "daily profit",
+    "weekly profit",
+    "monthly profit",
+    "return",
+    "roi",
+    "earnings",
+    "earning",
+    "withdraw",
+    "withdrawal",
+]
+
+
+ACTION = [
+    "invest now",
+    "start investing",
+    "make deposit",
+    "deposit funds",
+    "choose plan",
+    "investment amount",
+    "create account",
+    "open account",
+    "register",
+    "sign up",
+    "login",
+    "deposit",
 ]
 
 
@@ -94,23 +150,44 @@ BAD = [
 
 
 def _fetch(domain):
-    for scheme in (
-        "https://",
-        "http://",
-    ):
+    for scheme in ("https://", "http://"):
         try:
             request = urllib.request.Request(
                 scheme + domain,
                 headers={
-                    "User-Agent": "Mozilla/5.0 LD76-Investment-Radar",
-                    "Accept": "text/html,application/xhtml+xml",
+                    "User-Agent": (
+                        "Mozilla/5.0 "
+                        "(Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 "
+                        "Chrome/131 Safari/537.36 "
+                        "LD76-Investment-Radar/2.0"
+                    ),
+                    "Accept": (
+                        "text/html,"
+                        "application/xhtml+xml,"
+                        "application/xml;q=0.9,"
+                        "*/*;q=0.8"
+                    ),
                 },
             )
 
             with urllib.request.urlopen(
                 request,
-                timeout=5,
+                timeout=8,
             ) as response:
+                content_type = (
+                    response.headers.get(
+                        "Content-Type",
+                        ""
+                    ).lower()
+                )
+
+                if (
+                    content_type
+                    and "text" not in content_type
+                    and "html" not in content_type
+                ):
+                    return None, ""
 
                 html = response.read(
                     800000
@@ -119,20 +196,31 @@ def _fetch(domain):
                     "ignore",
                 )
 
-                return (
-                    response.geturl(),
-                    html,
-                )
+                return response.geturl(), html
 
         except Exception:
-            pass
+            continue
 
     return None, ""
 
 
 def _text(html):
     html = re.sub(
-        r"<script[\s\S]*?</script>|<style[\s\S]*?</style>",
+        r"<script[\s\S]*?</script>",
+        " ",
+        html,
+        flags=re.I,
+    )
+
+    html = re.sub(
+        r"<style[\s\S]*?</style>",
+        " ",
+        html,
+        flags=re.I,
+    )
+
+    html = re.sub(
+        r"<noscript[\s\S]*?</noscript>",
         " ",
         html,
         flags=re.I,
@@ -154,11 +242,17 @@ def _text(html):
 
 
 def _score(text):
-    if any(
-        phrase in text
+    if not text:
+        return 0, []
+
+    bad_hits = [
+        phrase
         for phrase in BAD
-    ):
-        return -100, []
+        if phrase in text
+    ]
+
+    if bad_hits:
+        return 0, []
 
     hits = []
     score = 0
@@ -168,54 +262,105 @@ def _score(text):
             score += weight
             hits.append(phrase)
 
-    score += sum(
-        2
-        for item in ACC
-        if item in text
-    )
-
-    score += sum(
-        2
+    pay_hits = [
+        item
         for item in PAY
         if item in text
-    )
+    ]
+
+    acc_hits = [
+        item
+        for item in ACC
+        if item in text
+    ]
+
+    money_hits = [
+        item
+        for item in MONEY
+        if item in text
+    ]
+
+    action_hits = [
+        item
+        for item in ACTION
+        if item in text
+    ]
+
+    score += min(len(pay_hits) * 3, 12)
+    score += min(len(acc_hits) * 2, 8)
 
     strong = sum(
         1
         for item in hits
-        if POS[item] >= 8
+        if POS.get(item, 0) >= 8
     )
 
-    action = any(
+    investment_family = any(
         item in text
         for item in (
+            "investment",
+            "investing",
             "invest now",
-            "start investing",
-            "make deposit",
-            "deposit funds",
-            "choose plan",
-            "investment amount",
-        )
-    )
-
-    money = any(
-        item in text
-        for item in (
-            "deposit",
-            "minimum investment",
-            "investment amount",
-            "profit percentage",
+            "investment plan",
+            "investment package",
+            "profit rate",
             "daily profit",
-            "monthly profit",
+            "passive income",
+            "capital investment",
+            "crypto investment",
+            "cloud mining",
         )
     )
 
-    if strong < 2 or not (
-        action and money
-    ):
-        return 0, hits
+    financial_family = bool(
+        money_hits
+        or pay_hits
+    )
 
-    return score, hits
+    action_family = bool(
+        action_hits
+        or acc_hits
+    )
+
+    if strong >= 1 and investment_family and financial_family:
+        score += 8
+
+    if investment_family and action_family and financial_family:
+        score += 8
+
+    if (
+        "investment" in text
+        and (
+            "profit" in text
+            or "return" in text
+            or "earn" in text
+        )
+    ):
+        score += 8
+
+    if (
+        "deposit" in text
+        and (
+            "profit" in text
+            or "investment" in text
+            or "return" in text
+        )
+    ):
+        score += 8
+
+    unique_hits = []
+
+    for item in (
+        hits
+        + pay_hits
+        + acc_hits
+        + money_hits
+        + action_hits
+    ):
+        if item not in unique_hits:
+            unique_hits.append(item)
+
+    return score, unique_hits
 
 
 def detect_investment(domain):
@@ -226,9 +371,12 @@ def detect_investment(domain):
 
     text = _text(html)
 
+    if len(text) < 40:
+        return None
+
     score, hits = _score(text)
 
-    if score < 20:
+    if score < 18:
         return None
 
     title = ""
@@ -253,9 +401,13 @@ def detect_investment(domain):
     categories = {
         "Crypto Investment": [
             "usdt",
+            "usdc",
+            "bitcoin",
             "btc",
             "ethereum",
+            "eth",
             "crypto",
+            "cryptocurrency",
         ],
         "Forex Investment": [
             "forex",
@@ -265,14 +417,17 @@ def detect_investment(domain):
         "Real Estate Investment": [
             "real estate",
             "property investment",
+            "property investing",
         ],
         "Trading Investment": [
             "trading platform",
             "trading account",
+            "trading investment",
         ],
         "Mining Investment": [
             "cloud mining",
             "mining investment",
+            "mining plan",
         ],
         "DeFi Investment": [
             "defi",
@@ -282,6 +437,7 @@ def detect_investment(domain):
         "Lending Investment": [
             "lending",
             "loan investment",
+            "p2p lending",
         ],
     }
 
