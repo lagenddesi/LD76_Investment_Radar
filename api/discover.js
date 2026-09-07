@@ -3,43 +3,149 @@
 /*
  * LD76 INVESTMENT RADAR
  *
- * DISCOVERY v3
+ * DISCOVERY v4
  *
- * PRIMARY DISCOVERY:
- *   Smet.cz Newly Registered Domain Feed
+ * PRIMARY:
+ *   Smet Newly Registered Domains JSON feed
  *
- * OPTIONAL FALLBACK:
- *   Certificate Transparency sources
+ * SECONDARY:
+ *   crt.sh Certificate Transparency
+ *
+ * FINAL AUTHORITY:
+ *   RDAP registration event
  *
  * IMPORTANT:
- *   Feed visibility is NOT treated as the final registration date.
+ *   CT first-seen date is NEVER treated as registration date.
  *
- * FINAL HARD GATE:
- *   RDAP registration event MUST exist
- *   AND MUST be inside the selected 24H / 48H window.
+ * A domain is returned only when:
  *
- * This prevents:
- *   - CT outage from killing discovery
- *   - certificate date being mistaken for registration date
- *   - old domains being treated as newly registered
+ *   1. It was discovered from a supported source
+ *   2. Its TLD matches
+ *   3. Its name passes the lightweight relevance filter
+ *   4. RDAP returns a registration event
+ *   5. RDAP registration date is inside 24H / 48H
  *
- * No arbitrary 4/5 domain limit.
+ * Every failure is returned as structured JSON.
  */
 
-const MAX_FEED_DOMAINS = 1000000;
 
-const FEED_TIMEOUT_MS = 20000;
-const CT_TIMEOUT_MS = 15000;
-const RDAP_TIMEOUT_MS = 5000;
+/* =========================================================
+ * CONFIG
+ * ========================================================= */
 
-const FEED_RETRIES = 2;
-const CT_RETRIES = 1;
+const SMET_TIMEOUT_MS = 12000;
+const CRT_TIMEOUT_MS = 12000;
+const RDAP_TIMEOUT_MS = 3500;
+
+const SMET_RETRIES = 1;
+const CRT_RETRIES = 1;
 const RDAP_RETRIES = 1;
 
-const RDAP_CONCURRENCY = 8;
+/*
+ * Keep enough concurrency to finish inside Vercel's
+ * serverless execution window without hammering RDAP.
+ */
+const RDAP_CONCURRENCY = 20;
+
+/*
+ * Stop doing new RDAP requests before Vercel's timeout.
+ * Already-running requests are allowed to finish.
+ */
+const DISCOVERY_BUDGET_MS = 70000;
 
 const FUTURE_TOLERANCE_MS =
   5 * 60 * 1000;
+
+
+/* =========================================================
+ * SAFE JSON RESPONSE
+ * ========================================================= */
+
+function sendJson(
+  res,
+  status,
+  payload
+) {
+  try {
+    res.status(status);
+
+    res.setHeader(
+      "Content-Type",
+      "application/json; charset=utf-8"
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
+
+    return res.json(payload);
+
+  } catch (error) {
+    /*
+     * Last-resort fallback.
+     *
+     * This prevents Vercel from returning an HTML error page
+     * that the frontend cannot parse as JSON.
+     */
+
+    try {
+      return res
+        .status(500)
+        .end(
+          JSON.stringify({
+            ok: false,
+
+            stage:
+              "response",
+
+            error:
+              "Failed to serialize discovery response",
+
+            details:
+              error?.message ||
+              "Unknown response error"
+          })
+        );
+
+    } catch {
+      return res.end();
+    }
+  }
+}
+
+
+/* =========================================================
+ * ERROR HELPERS
+ * ========================================================= */
+
+function errorMessage(error) {
+  if (!error) {
+    return "Unknown error";
+  }
+
+  return (
+    error.message ||
+    String(error)
+  );
+}
+
+
+function errorDetails(
+  error,
+  extra = {}
+) {
+  return {
+    message:
+      errorMessage(error),
+
+    name:
+      error?.name ||
+      "Error",
+
+    ...extra
+  };
+}
 
 
 /* =========================================================
@@ -47,7 +153,10 @@ const FUTURE_TOLERANCE_MS =
  * ========================================================= */
 
 function normalizeTld(value) {
-  if (typeof value !== "string") {
+  if (
+    typeof value !==
+    "string"
+  ) {
     return null;
   }
 
@@ -60,11 +169,18 @@ function normalizeTld(value) {
     return null;
   }
 
-  if (!tld.startsWith(".")) {
-    tld = "." + tld;
+  if (
+    !tld.startsWith(".")
+  ) {
+    tld =
+      "." + tld;
   }
 
-  if (!/^\.[a-z0-9-]{2,24}$/.test(tld)) {
+  if (
+    !/^\.[a-z0-9-]{2,63}$/.test(
+      tld
+    )
+  ) {
     return null;
   }
 
@@ -73,9 +189,14 @@ function normalizeTld(value) {
 
 
 function normalizePeriod(body) {
-  if (body?.periodHours !== undefined) {
+  if (
+    body?.periodHours !==
+    undefined
+  ) {
     const hours =
-      Number(body.periodHours);
+      Number(
+        body.periodHours
+      );
 
     if (
       hours === 24 ||
@@ -87,19 +208,30 @@ function normalizePeriod(body) {
 
   const period =
     String(
-      body?.period || "24h"
+      body?.period ||
+      "24h"
     )
       .trim()
       .toLowerCase();
 
-  return period === "48h"
-    ? 48
-    : 24;
+  if (
+    period === "48h" ||
+    period === "48"
+  ) {
+    return 48;
+  }
+
+  return 24;
 }
 
 
-function normalizeDomain(value) {
-  if (typeof value !== "string") {
+function normalizeDomain(
+  value
+) {
+  if (
+    typeof value !==
+    "string"
+  ) {
     return null;
   }
 
@@ -141,7 +273,9 @@ function normalizeDomain(value) {
   const valid =
     /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
-  if (!valid.test(domain)) {
+  if (
+    !valid.test(domain)
+  ) {
     return null;
   }
 
@@ -150,22 +284,26 @@ function normalizeDomain(value) {
 
 
 /* =========================================================
- * TIME HELPERS
+ * TIME
  * ========================================================= */
 
 function sleep(ms) {
   return new Promise(
-    resolve => setTimeout(resolve, ms)
+    resolve =>
+      setTimeout(
+        resolve,
+        ms
+      )
   );
 }
 
 
-function dateKeyUTC(date) {
-  return (
-    date
-      .toISOString()
-      .slice(0, 10)
-  );
+function dateKeyUTC(
+  date
+) {
+  return date
+    .toISOString()
+    .slice(0, 10);
 }
 
 
@@ -179,7 +317,8 @@ function addDaysUTC(
     );
 
   copy.setUTCDate(
-    copy.getUTCDate() + days
+    copy.getUTCDate() +
+    days
   );
 
   return copy;
@@ -187,10 +326,10 @@ function addDaysUTC(
 
 
 /* =========================================================
- * HTTP
+ * HTTP FETCH
  * ========================================================= */
 
-async function fetchText(
+async function fetchRaw(
   url,
   timeoutMs,
   headers = {}
@@ -210,14 +349,15 @@ async function fetchText(
       await fetch(
         url,
         {
-          method: "GET",
+          method:
+            "GET",
 
           headers: {
             Accept:
               "application/json,text/plain,*/*",
 
             "User-Agent":
-              "LD76-Investment-Radar/3.0",
+              "LD76-Investment-Radar/4.0",
 
             ...headers
           },
@@ -227,22 +367,44 @@ async function fetchText(
         }
       );
 
+    const contentType =
+      response.headers.get(
+        "content-type"
+      ) || "";
+
     const text =
       await response.text();
 
-    if (!response.ok) {
-      throw new Error(
-        `HTTP ${response.status}`
-      );
-    }
+    return {
+      ok:
+        response.ok,
 
-    if (!text.trim()) {
-      throw new Error(
-        "Empty response"
-      );
-    }
+      status:
+        response.status,
 
-    return text;
+      statusText:
+        response.statusText,
+
+      contentType,
+
+      text,
+
+      url
+    };
+
+  } catch (error) {
+    throw Object.assign(
+      new Error(
+        error?.name ===
+        "AbortError"
+          ? `Request timeout after ${timeoutMs}ms`
+          : errorMessage(error)
+      ),
+      {
+        originalName:
+          error?.name
+      }
+    );
 
   } finally {
     clearTimeout(timer);
@@ -250,13 +412,13 @@ async function fetchText(
 }
 
 
-async function fetchJsonWithRetry(
+async function fetchWithRetry(
   url,
   timeoutMs,
   retries,
   headers = {}
 ) {
-  let lastError = null;
+  let last = null;
 
   for (
     let attempt = 0;
@@ -264,44 +426,84 @@ async function fetchJsonWithRetry(
     attempt++
   ) {
     try {
-      const text =
-        await fetchText(
+      const response =
+        await fetchRaw(
           url,
           timeoutMs,
           headers
         );
 
-      let data;
+      if (
+        !response.ok
+      ) {
+        const error =
+          new Error(
+            `HTTP ${response.status}`
+          );
 
-      try {
-        data =
-          JSON.parse(text);
-      } catch {
-        throw new Error(
-          "Invalid JSON response"
-        );
+        return {
+          ok: false,
+
+          status:
+            response.status,
+
+          statusText:
+            response.statusText,
+
+          contentType:
+            response.contentType,
+
+          bodyPreview:
+            response.text
+              ?.slice(
+                0,
+                500
+              ),
+
+          url,
+
+          attempts:
+            attempt + 1,
+
+          error:
+            error.message
+        };
       }
 
       return {
         ok: true,
-        data,
+
+        status:
+          response.status,
+
+        statusText:
+          response.statusText,
+
+        contentType:
+          response.contentType,
+
+        text:
+          response.text,
+
+        url,
+
         attempts:
           attempt + 1,
+
         error: null
       };
 
     } catch (error) {
-      lastError =
-        error?.message ||
-        "Unknown request error";
+      last =
+        errorMessage(error);
 
       if (
-        attempt < retries
+        attempt <
+        retries
       ) {
         await sleep(
-          attempt === 0
-            ? 700
-            : 1600
+          500 *
+          (attempt + 1)
         );
       }
     }
@@ -309,159 +511,271 @@ async function fetchJsonWithRetry(
 
   return {
     ok: false,
-    data: null,
+
+    status: null,
+
+    statusText: null,
+
+    contentType: null,
+
+    bodyPreview: null,
+
+    url,
+
     attempts:
       retries + 1,
+
     error:
-      lastError
+      last ||
+      "Request failed"
   };
 }
 
 
 /* =========================================================
- * SMET NEWLY REGISTERED FEED
+ * JSON HTTP
  * ========================================================= */
 
-/*
- * Smet provides:
- *
- * /nrd/data/today.txt
- * /nrd/data/daily/YYYY-MM-DD.txt
- *
- * We use the daily files because:
- *
- * 24H:
- *   today + yesterday
- *
- * 48H:
- *   today + yesterday + day-before
- *
- * RDAP remains the final registration-date authority.
- */
+async function fetchJson(
+  url,
+  timeoutMs,
+  retries
+) {
+  const result =
+    await fetchWithRetry(
+      url,
+      timeoutMs,
+      retries,
+      {
+        Accept:
+          "application/json"
+      }
+    );
 
-function buildSmetDailyUrl(
+  if (!result.ok) {
+    return {
+      ...result,
+
+      data: null,
+
+      parseError: null
+    };
+  }
+
+  let data;
+
+  try {
+    data =
+      JSON.parse(
+        result.text
+      );
+
+  } catch (error) {
+    return {
+      ...result,
+
+      ok: false,
+
+      data: null,
+
+      parseError:
+        errorMessage(error),
+
+      error:
+        "Server returned non-JSON data"
+    };
+  }
+
+  return {
+    ...result,
+
+    ok: true,
+
+    data,
+
+    parseError: null
+  };
+}
+
+
+/* =========================================================
+ * SMET
+ * ========================================================= */
+
+function buildSmetJsonUrl(
   date
 ) {
   return (
     "https://smet.cz/nrd/data/daily/" +
     date +
-    ".txt"
+    ".json"
   );
 }
 
 
-async function fetchSmetDaily(
+async function fetchSmetDay(
   date
 ) {
   const url =
-    buildSmetDailyUrl(
+    buildSmetJsonUrl(
       date
     );
 
   const result =
-    await fetchTextWithRetry(
+    await fetchJson(
       url,
-      FEED_TIMEOUT_MS,
-      FEED_RETRIES
+      SMET_TIMEOUT_MS,
+      SMET_RETRIES
     );
 
   if (!result.ok) {
     return {
       ok: false,
+
       date,
+
       url,
+
       domains: [],
+
+      count: 0,
+
       error:
-        result.error
+        result.error ||
+        "Smet request failed",
+
+      diagnostic: {
+        status:
+          result.status,
+
+        statusText:
+          result.statusText,
+
+        contentType:
+          result.contentType,
+
+        bodyPreview:
+          result.bodyPreview,
+
+        parseError:
+          result.parseError,
+
+        attempts:
+          result.attempts,
+
+        url
+      }
+    };
+  }
+
+  /*
+   * Expected Smet shape:
+   *
+   * {
+   *   date,
+   *   count,
+   *   generated_at,
+   *   domains: [...]
+   * }
+   */
+
+  const rawDomains =
+    Array.isArray(
+      result.data?.domains
+    )
+      ? result.data.domains
+      : Array.isArray(
+          result.data
+        )
+        ? result.data
+        : null;
+
+  if (!rawDomains) {
+    return {
+      ok: false,
+
+      date,
+
+      url,
+
+      domains: [],
+
+      count: 0,
+
+      error:
+        "Smet JSON does not contain a domains array",
+
+      diagnostic: {
+        status:
+          result.status,
+
+        contentType:
+          result.contentType,
+
+        keys:
+          result.data &&
+          typeof result.data ===
+            "object"
+            ? Object.keys(
+                result.data
+              )
+            : [],
+
+        url
+      }
     };
   }
 
   const domains =
-    result.text
-      .split(/\r?\n/)
+    rawDomains
       .map(
         value =>
-          normalizeDomain(value)
+          normalizeDomain(
+            value
+          )
       )
       .filter(Boolean);
 
   return {
     ok: true,
+
     date,
+
     url,
+
     domains,
-    error: null
-  };
-}
 
+    count:
+      domains.length,
 
-async function fetchTextWithRetry(
-  url,
-  timeoutMs,
-  retries
-) {
-  let lastError = null;
+    generatedAt:
+      result.data?.generated_at ||
+      null,
 
-  for (
-    let attempt = 0;
-    attempt <= retries;
-    attempt++
-  ) {
-    try {
-      const text =
-        await fetchText(
-          url,
-          timeoutMs
-        );
+    error: null,
 
-      return {
-        ok: true,
-        text,
-        attempts:
-          attempt + 1,
-        error: null
-      };
+    diagnostic: {
+      status:
+        result.status,
 
-    } catch (error) {
-      lastError =
-        error?.message ||
-        "Unknown request error";
+      contentType:
+        result.contentType,
 
-      if (
-        attempt < retries
-      ) {
-        await sleep(
-          attempt === 0
-            ? 700
-            : 1600
-        );
-      }
+      rawCount:
+        rawDomains.length,
+
+      normalizedCount:
+        domains.length,
+
+      url
     }
-  }
-
-  return {
-    ok: false,
-    text: "",
-    attempts:
-      retries + 1,
-    error:
-      lastError
   };
 }
 
 
 /* =========================================================
- * INVESTMENT DOMAIN-NAME PREFILTER
+ * INVESTMENT NAME PREFILTER
  * ========================================================= */
-
-/*
- * This is NOT the final relevance test.
- *
- * It only prevents RDAP from being called for hundreds
- * of thousands of obviously unrelated domains.
- *
- * Website content scanner remains the real relevance filter.
- */
 
 const INVESTMENT_NAME_PATTERNS = [
   "invest",
@@ -469,7 +783,6 @@ const INVESTMENT_NAME_PATTERNS = [
   "investments",
 
   "profit",
-  "profits",
   "profits",
 
   "earning",
@@ -505,8 +818,10 @@ const INVESTMENT_NAME_PATTERNS = [
 
   "bitcoin",
   "btc",
+
   "ethereum",
   "eth",
+
   "usdt",
 
   "mining",
@@ -535,44 +850,48 @@ const INVESTMENT_NAME_PATTERNS = [
   "referral",
   "affiliate",
 
-  "income",
-
-  "wealth",
-
   "bank",
 
   "loan",
   "loans",
 
   "asset",
-  "assets",
-
-  "trading"
+  "assets"
 ];
 
 
 function investmentNameMatch(
   domain
 ) {
-  const label =
+  const labels =
     domain
       .split(".")
-      .slice(0, -1)
+      .slice(
+        0,
+        -1
+      )
       .join(".")
-      .replace(/[-_]/g, "")
+      .replace(
+        /[-_]/g,
+        ""
+      )
       .toLowerCase();
 
   return INVESTMENT_NAME_PATTERNS.some(
     keyword =>
-      label.includes(
-        keyword.replace(/[-_]/g, "")
+      labels.includes(
+        keyword
+          .replace(
+            /[-_]/g,
+            ""
+          )
       )
   );
 }
 
 
 /* =========================================================
- * SMET CANDIDATE COLLECTION
+ * SMET DISCOVERY
  * ========================================================= */
 
 async function discoverFromSmet(
@@ -582,58 +901,79 @@ async function discoverFromSmet(
   const now =
     new Date();
 
-  const today =
-    dateKeyUTC(now);
-
   const dates = [
-    today,
+    dateKeyUTC(now),
+
     dateKeyUTC(
-      addDaysUTC(now, -1)
+      addDaysUTC(
+        now,
+        -1
+      )
     )
   ];
+
+  /*
+   * For 48H include the day before yesterday.
+   */
 
   if (
     periodHours === 48
   ) {
     dates.push(
       dateKeyUTC(
-        addDaysUTC(now, -2)
+        addDaysUTC(
+          now,
+          -2
+        )
       )
     );
   }
 
   const sourceResults = [];
 
-  for (const date of dates) {
-    const result =
-      await fetchSmetDaily(
-        date
-      );
+  /*
+   * Fetch the days in parallel.
+   */
 
-    sourceResults.push(
-      result
+  const results =
+    await Promise.all(
+      dates.map(
+        date =>
+          fetchSmetDay(
+            date
+          )
+      )
     );
-  }
+
+  sourceResults.push(
+    ...results
+  );
 
   const successful =
-    sourceResults.filter(
-      item => item.ok
+    results.filter(
+      item =>
+        item.ok
     );
 
-  if (!successful.length) {
+  if (
+    successful.length === 0
+  ) {
     return {
       ok: false,
+
       candidates: [],
+
       sourceResults,
+
       error:
-        "Smet newly-registered feed unavailable"
+        "Smet newly-registered feed failed for every requested day"
     };
   }
 
   const map =
     new Map();
 
-  let feedDomains = 0;
+  let totalFeedDomains = 0;
   let tldMatches = 0;
   let nameMatches = 0;
 
@@ -645,7 +985,7 @@ async function discoverFromSmet(
       const domain
       of source.domains
     ) {
-      feedDomains++;
+      totalFeedDomains++;
 
       if (
         !domain.endsWith(tld)
@@ -656,10 +996,9 @@ async function discoverFromSmet(
       tldMatches++;
 
       /*
-       * Name prefilter only.
+       * Lightweight filter.
        *
-       * This does NOT decide whether the website
-       * is an investment website.
+       * This is NOT the final scam/investment filter.
        */
 
       if (
@@ -688,7 +1027,10 @@ async function discoverFromSmet(
               "smet-newly-registered-feed",
 
             discoverySource:
-              source.url
+              source.url,
+
+            feedDate:
+              source.date
           }
         );
       }
@@ -704,9 +1046,18 @@ async function discoverFromSmet(
     sourceResults,
 
     statistics: {
-      feedDomains,
+      requestedDays:
+        dates.length,
+
+      successfulDays:
+        successful.length,
+
+      totalFeedDomains,
+
       tldMatches,
+
       nameMatches,
+
       uniqueCandidates:
         map.size
     },
@@ -717,19 +1068,23 @@ async function discoverFromSmet(
 
 
 /* =========================================================
- * CRT.SH FALLBACK
+ * CRT.SH
  * ========================================================= */
 
 function buildCrtUrl(
   tld
 ) {
-  const wildcard =
+  /*
+   * crt.sh wildcard query.
+   */
+
+  const query =
     `%${tld}`;
 
   return (
     "https://crt.sh/?q=" +
     encodeURIComponent(
-      wildcard
+      query
     ) +
     "&output=json"
   );
@@ -740,22 +1095,50 @@ async function queryCrtSh(
   tld
 ) {
   const url =
-    buildCrtUrl(tld);
+    buildCrtUrl(
+      tld
+    );
 
   const result =
-    await fetchJsonWithRetry(
+    await fetchJson(
       url,
-      CT_TIMEOUT_MS,
-      CT_RETRIES
+      CRT_TIMEOUT_MS,
+      CRT_RETRIES
     );
 
   if (!result.ok) {
     return {
       ok: false,
+
       rows: [],
+
+      url,
+
       error:
-        result.error,
-      url
+        result.error ||
+        "crt.sh request failed",
+
+      diagnostic: {
+        status:
+          result.status,
+
+        statusText:
+          result.statusText,
+
+        contentType:
+          result.contentType,
+
+        bodyPreview:
+          result.bodyPreview,
+
+        parseError:
+          result.parseError,
+
+        attempts:
+          result.attempts,
+
+        url
+      }
     };
   }
 
@@ -766,19 +1149,51 @@ async function queryCrtSh(
   ) {
     return {
       ok: false,
+
       rows: [],
+
+      url,
+
       error:
-        "crt.sh returned unsupported JSON",
-      url
+        "crt.sh response is not an array",
+
+      diagnostic: {
+        status:
+          result.status,
+
+        contentType:
+          result.contentType,
+
+        type:
+          typeof result.data,
+
+        url
+      }
     };
   }
 
   return {
     ok: true,
+
     rows:
       result.data,
+
+    url,
+
     error: null,
-    url
+
+    diagnostic: {
+      status:
+        result.status,
+
+      contentType:
+        result.contentType,
+
+      rows:
+        result.data.length,
+
+      url
+    }
   };
 }
 
@@ -913,21 +1328,25 @@ function collectCtCandidates(
         continue;
       }
 
-      map.set(
-        domain,
-        {
+      if (
+        !map.has(domain)
+      ) {
+        map.set(
           domain,
+          {
+            domain,
 
-          discoveredAt:
-            date.toISOString(),
+            discoveredAt:
+              date.toISOString(),
 
-          discoveryEvidence:
-            "certificate-transparency",
+            discoveryEvidence:
+              "certificate-transparency",
 
-          discoverySource:
-            "crt.sh"
-        }
-      );
+            discoverySource:
+              "crt.sh"
+          }
+        );
+      }
     }
   }
 
@@ -951,11 +1370,11 @@ function extractRegistrationDate(
       ? rdap.events
       : [];
 
-  const event =
+  const registration =
     events.find(
-      item =>
+      event =>
         String(
-          item?.eventAction ||
+          event?.eventAction ||
           ""
         )
           .trim()
@@ -964,14 +1383,14 @@ function extractRegistrationDate(
     );
 
   if (
-    !event?.eventDate
+    !registration?.eventDate
   ) {
     return null;
   }
 
   const date =
     new Date(
-      event.eventDate
+      registration.eventDate
     );
 
   if (
@@ -987,8 +1406,36 @@ function extractRegistrationDate(
 
 
 async function verifyRegistration(
-  domain
+  domain,
+  cutoff,
+  scanDeadline
 ) {
+  /*
+   * Don't start a new request if the overall scan is
+   * already approaching the Vercel execution limit.
+   */
+
+  if (
+    Date.now() >=
+    scanDeadline
+  ) {
+    return {
+      domain,
+
+      verified: false,
+
+      inWindow: false,
+
+      registeredAt: null,
+
+      error:
+        "RDAP verification skipped because discovery time budget was reached",
+
+      reason:
+        "SCAN_TIME_BUDGET"
+    };
+  }
+
   const url =
     "https://rdap.org/domain/" +
     encodeURIComponent(
@@ -996,24 +1443,52 @@ async function verifyRegistration(
     );
 
   const result =
-    await fetchJsonWithRetry(
+    await fetchJson(
       url,
       RDAP_TIMEOUT_MS,
-      RDAP_RETRIES,
-      {
-        Accept:
-          "application/rdap+json,application/json"
-      }
+      RDAP_RETRIES
     );
 
   if (!result.ok) {
     return {
+      domain,
+
       verified: false,
+
+      inWindow: false,
+
       registeredAt: null,
-      registrationInWindow:
-        false,
+
       error:
-        result.error
+        result.error ||
+        "RDAP request failed",
+
+      reason:
+        result.status
+          ? `HTTP_${result.status}`
+          : "RDAP_REQUEST_ERROR",
+
+      diagnostic: {
+        status:
+          result.status,
+
+        statusText:
+          result.statusText,
+
+        contentType:
+          result.contentType,
+
+        bodyPreview:
+          result.bodyPreview,
+
+        parseError:
+          result.parseError,
+
+        attempts:
+          result.attempts,
+
+        url
+      }
     };
   }
 
@@ -1024,95 +1499,134 @@ async function verifyRegistration(
 
   if (!registeredAt) {
     return {
+      domain,
+
       verified: false,
+
+      inWindow: false,
+
       registeredAt: null,
-      registrationInWindow:
-        false,
+
       error:
-        "RDAP registration event not found"
+        "RDAP registration event not found",
+
+      reason:
+        "REGISTRATION_EVENT_MISSING",
+
+      diagnostic: {
+        status:
+          result.status,
+
+        contentType:
+          result.contentType,
+
+        url
+      }
     };
   }
 
+  const registrationTime =
+    registeredAt.getTime();
+
+  const now =
+    Date.now();
+
+  const inWindow =
+    registrationTime >=
+      cutoff &&
+    registrationTime <=
+      now +
+        FUTURE_TOLERANCE_MS;
+
   return {
+    domain,
+
     verified: true,
+
+    inWindow,
 
     registeredAt:
       registeredAt.toISOString(),
 
-    registrationInWindow:
-      false,
+    error:
+      inWindow
+        ? null
+        : "Registration date outside selected period",
 
-    error: null
+    reason:
+      inWindow
+        ? "REGISTRATION_CONFIRMED"
+        : "OUTSIDE_SELECTED_PERIOD",
+
+    diagnostic: {
+      status:
+        result.status,
+
+      contentType:
+        result.contentType,
+
+      url
+    }
   };
 }
 
 
 /* =========================================================
- * CONCURRENCY
+ * CONCURRENT RDAP
  * ========================================================= */
 
-async function runWithConcurrency(
-  items,
-  limit,
-  worker
+async function verifyCandidates(
+  candidates,
+  cutoff,
+  scanDeadline
 ) {
   const results =
     new Array(
-      items.length
+      candidates.length
     );
 
   let nextIndex = 0;
 
-  async function runner() {
+  async function worker() {
     while (true) {
       const index =
         nextIndex++;
 
       if (
         index >=
-        items.length
+        candidates.length
       ) {
         return;
       }
 
-      try {
-        results[index] =
-          await worker(
-            items[index]
-          );
-      } catch (error) {
-        results[index] = {
-          ...items[index],
-
-          registrationVerified:
-            false,
-
-          registrationInWindow:
-            false,
-
-          registeredAt:
-            null,
-
-          registrationError:
-            error?.message ||
-            "Verification failed"
-        };
-      }
+      results[index] =
+        await verifyRegistration(
+          candidates[index].domain,
+          cutoff,
+          scanDeadline
+        );
     }
   }
 
-  const workers =
+  const workerCount =
     Math.min(
-      limit,
-      items.length
+      RDAP_CONCURRENCY,
+      candidates.length
     );
+
+  if (
+    workerCount === 0
+  ) {
+    return [];
+  }
 
   await Promise.all(
     Array.from(
       {
-        length: workers
+        length:
+          workerCount
       },
-      runner
+      worker
     )
   );
 
@@ -1128,21 +1642,36 @@ export default async function handler(
   req,
   res
 ) {
+  const requestStarted =
+    Date.now();
+
+  /*
+   * Always return JSON, even for bad methods.
+   */
+
   if (
     req.method !==
     "POST"
   ) {
-    return res
-      .status(405)
-      .json({
+    return sendJson(
+      res,
+      405,
+      {
         ok: false,
-        error:
-          "Method not allowed. Use POST."
-      });
-  }
 
-  const started =
-    Date.now();
+        stage:
+          "request",
+
+        error:
+          "Method not allowed. Use POST.",
+
+        diagnostic: {
+          method:
+            req.method
+        }
+      }
+    );
+  }
 
   try {
     const body =
@@ -1160,13 +1689,26 @@ export default async function handler(
       );
 
     if (!tld) {
-      return res
-        .status(400)
-        .json({
+      return sendJson(
+        res,
+        400,
+        {
           ok: false,
+
+          stage:
+            "validation",
+
           error:
-            "Invalid TLD"
-        });
+            "Invalid TLD",
+
+          diagnostic: {
+            receivedTld:
+              body.tld ||
+              body.tldValue ||
+              null
+          }
+        }
+      );
     }
 
     const now =
@@ -1180,10 +1722,18 @@ export default async function handler(
       1000;
 
     /*
-     * -------------------------------------------------------
-     * SOURCE 1: SMET
-     * -------------------------------------------------------
+     * Stop discovery/RDAP before Vercel can produce
+     * its own non-JSON 504 page.
      */
+
+    const scanDeadline =
+      requestStarted +
+      DISCOVERY_BUDGET_MS;
+
+
+    /* =====================================================
+     * SMET PRIMARY
+     * ===================================================== */
 
     const smet =
       await discoverFromSmet(
@@ -1191,14 +1741,12 @@ export default async function handler(
         periodHours
       );
 
-    /*
-     * -------------------------------------------------------
-     * SOURCE 2: CRT.SH
+
+    /* =====================================================
+     * CRT SECONDARY
      *
-     * Only used as additional discovery evidence.
-     * Its failure MUST NOT fail the whole scan.
-     * -------------------------------------------------------
-     */
+     * CRT failure is NEVER fatal when Smet works.
+     * ===================================================== */
 
     const crt =
       await queryCrtSh(
@@ -1214,11 +1762,10 @@ export default async function handler(
           )
         : [];
 
-    /*
-     * -------------------------------------------------------
-     * MERGE SOURCES
-     * -------------------------------------------------------
-     */
+
+    /* =====================================================
+     * MERGE
+     * ===================================================== */
 
     const merged =
       new Map();
@@ -1230,7 +1777,9 @@ export default async function handler(
       ) {
         merged.set(
           candidate.domain,
-          candidate
+          {
+            ...candidate
+          }
         );
       }
     }
@@ -1247,8 +1796,11 @@ export default async function handler(
       if (!existing) {
         merged.set(
           candidate.domain,
-          candidate
+          {
+            ...candidate
+          }
         );
+
       } else {
         existing.discoveryEvidence =
           existing.discoveryEvidence +
@@ -1257,24 +1809,23 @@ export default async function handler(
     }
 
     const discoveryCandidates =
-      [...merged.values()];
+      [
+        ...merged.values()
+      ];
 
-    /*
-     * -------------------------------------------------------
-     * IF SMET + CRT BOTH FAIL
-     *
-     * We still don't immediately throw if a source returned
-     * an empty but valid result.
-     * -------------------------------------------------------
-     */
+
+    /* =====================================================
+     * BOTH SOURCES FAILED
+     * ===================================================== */
 
     if (
       !smet.ok &&
       !crt.ok
     ) {
-      return res
-        .status(502)
-        .json({
+      return sendJson(
+        res,
+        502,
+        {
           ok: false,
 
           stage:
@@ -1283,133 +1834,221 @@ export default async function handler(
           error:
             "All discovery sources failed",
 
+          diagnostic: {
+            elapsedMs:
+              Date.now() -
+              requestStarted,
+
+            tld,
+
+            periodHours,
+
+            sources: {
+              smet: {
+                ok: false,
+
+                error:
+                  smet.error,
+
+                days:
+                  smet.sourceResults
+                    .map(
+                      item => ({
+                        date:
+                          item.date,
+
+                        url:
+                          item.url,
+
+                        error:
+                          item.error,
+
+                        diagnostic:
+                          item.diagnostic
+                      })
+                    )
+              },
+
+              crtSh: {
+                ok: false,
+
+                error:
+                  crt.error,
+
+                url:
+                  crt.url,
+
+                diagnostic:
+                  crt.diagnostic
+              }
+            }
+          }
+        }
+      );
+    }
+
+
+    /* =====================================================
+     * NO DISCOVERY CANDIDATES
+     *
+     * This is NOT an error.
+     * ===================================================== */
+
+    if (
+      discoveryCandidates.length ===
+      0
+    ) {
+      return sendJson(
+        res,
+        200,
+        {
+          ok: true,
+
+          stage:
+            "discovery",
+
+          tld,
+
+          periodHours,
+
+          cutoff:
+            new Date(
+              cutoff
+            ).toISOString(),
+
+          discovered: 0,
+
+          registrationVerified:
+            0,
+
+          registrationRejected:
+            0,
+
+          verificationFailed:
+            0,
+
+          candidates: [],
+
           sources: {
             smet: {
-              ok: false,
+              ok:
+                smet.ok,
+
               error:
                 smet.error,
 
-              urls:
+              statistics:
+                smet.statistics ||
+                null,
+
+              days:
                 smet.sourceResults
-                  ?.map(
-                    item =>
-                      item.url
-                  ) || []
+                  .map(
+                    item => ({
+                      date:
+                        item.date,
+
+                      ok:
+                        item.ok,
+
+                      count:
+                        item.count,
+
+                      error:
+                        item.error
+                    })
+                  )
             },
 
             crtSh: {
-              ok: false,
+              ok:
+                crt.ok,
+
               error:
                 crt.error,
 
-              url:
-                crt.url
+              candidates:
+                ctCandidates.length,
+
+              diagnostic:
+                crt.diagnostic
             }
           },
 
-          requests: 0,
+          statistics: {
+            smetCandidates:
+              smet.candidates
+                ?.length ||
+              0,
+
+            ctCandidates:
+              ctCandidates.length,
+
+            mergedCandidates:
+              0
+          },
 
           elapsedMs:
             Date.now() -
-            started
-        });
-    }
-
-    /*
-     * -------------------------------------------------------
-     * RDAP VERIFICATION
-     * -------------------------------------------------------
-     *
-     * This is the HARD registration-date gate.
-     */
-
-    const verified =
-      await runWithConcurrency(
-        discoveryCandidates,
-        RDAP_CONCURRENCY,
-        async candidate => {
-          const result =
-            await verifyRegistration(
-              candidate.domain
-            );
-
-          let inWindow =
-            false;
-
-          if (
-            result.verified &&
-            result.registeredAt
-          ) {
-            const time =
-              new Date(
-                result.registeredAt
-              ).getTime();
-
-            inWindow =
-              time >= cutoff &&
-              time <=
-                Date.now() +
-                FUTURE_TOLERANCE_MS;
-          }
-
-          return {
-            ...candidate,
-
-            registeredAt:
-              result.registeredAt,
-
-            registrationVerified:
-              result.verified,
-
-            registrationInWindow:
-              inWindow,
-
-            registrationError:
-              result.error
-          };
+            requestStarted
         }
       );
+    }
 
-    /*
-     * -------------------------------------------------------
-     * HARD FILTER
-     * -------------------------------------------------------
-     */
 
-    const finalCandidates =
-      verified.filter(
-        candidate =>
-          candidate.registrationVerified ===
-            true &&
-          candidate.registrationInWindow ===
-            true
+    /* =====================================================
+     * RDAP
+     * ===================================================== */
+
+    const rdapResults =
+      await verifyCandidates(
+        discoveryCandidates,
+        cutoff,
+        scanDeadline
       );
 
-    const registrationRejected =
-      verified.filter(
-        candidate =>
-          candidate.registrationVerified ===
-            true &&
-          candidate.registrationInWindow ===
-            false
-      );
 
-    const verificationFailed =
-      verified.filter(
-        candidate =>
-          candidate.registrationVerified !==
+    const verified =
+      rdapResults.filter(
+        item =>
+          item?.verified ===
           true
       );
 
-    /*
-     * -------------------------------------------------------
-     * RESPONSE
-     * -------------------------------------------------------
-     */
+    const finalCandidates =
+      rdapResults.filter(
+        item =>
+          item?.verified ===
+            true &&
+          item?.inWindow ===
+            true
+      );
 
-    return res
-      .status(200)
-      .json({
+    const outsideWindow =
+      rdapResults.filter(
+        item =>
+          item?.verified ===
+            true &&
+          item?.inWindow ===
+            false
+      );
+
+    const failed =
+      rdapResults.filter(
+        item =>
+          item?.verified !==
+          true
+      );
+
+
+    /* =====================================================
+     * RETURN
+     * ===================================================== */
+
+    return sendJson(
+      res,
+      200,
+      {
         ok: true,
 
         stage:
@@ -1431,13 +2070,51 @@ export default async function handler(
           finalCandidates.length,
 
         registrationRejected:
-          registrationRejected.length,
+          outsideWindow.length,
 
         verificationFailed:
-          verificationFailed.length,
+          failed.length,
 
         candidates:
-          finalCandidates,
+          finalCandidates.map(
+            item => ({
+              domain:
+                item.domain,
+
+              discoveredAt:
+                discoveryCandidates.find(
+                  candidate =>
+                    candidate.domain ===
+                    item.domain
+                )?.discoveredAt ||
+                null,
+
+              registeredAt:
+                item.registeredAt,
+
+              registrationVerified:
+                true,
+
+              registrationInWindow:
+                true,
+
+              discoveryEvidence:
+                discoveryCandidates.find(
+                  candidate =>
+                    candidate.domain ===
+                    item.domain
+                )?.discoveryEvidence ||
+                null,
+
+              discoverySource:
+                discoveryCandidates.find(
+                  candidate =>
+                    candidate.domain ===
+                    item.domain
+                )?.discoverySource ||
+                null
+            })
+          ),
 
         sources: {
           smet: {
@@ -1453,7 +2130,7 @@ export default async function handler(
 
             days:
               smet.sourceResults
-                ?.map(
+                .map(
                   item => ({
                     date:
                       item.date,
@@ -1462,13 +2139,17 @@ export default async function handler(
                       item.ok,
 
                     count:
-                      item.domains
-                        ?.length || 0,
+                      item.count,
 
                     error:
-                      item.error
+                      item.error,
+
+                    diagnostic:
+                      item.ok
+                        ? undefined
+                        : item.diagnostic
                   })
-                ) || []
+                )
           },
 
           crtSh: {
@@ -1478,56 +2159,119 @@ export default async function handler(
             error:
               crt.error,
 
-            url:
-              crt.url,
-
             candidates:
-              ctCandidates.length
+              ctCandidates.length,
+
+            diagnostic:
+              crt.diagnostic
+          },
+
+          rdap: {
+            source:
+              "rdap.org",
+
+            required:
+              true,
+
+            concurrency:
+              RDAP_CONCURRENCY
           }
         },
 
-        statistics: {
-          smetCandidates:
-            smet.candidates
-              ?.length || 0,
-
-          ctCandidates:
-            ctCandidates.length,
-
-          mergedCandidates:
+        diagnostics: {
+          discoveryCandidates:
             discoveryCandidates.length,
 
-          registrationVerified:
+          rdapVerified:
+            verified.length,
+
+          registrationConfirmed:
             finalCandidates.length,
 
-          registrationRejected:
-            registrationRejected.length,
+          outsideSelectedPeriod:
+            outsideWindow.length,
 
-          verificationFailed:
-            verificationFailed.length
-        },
+          rdapFailed:
+            failed.length,
 
-        elapsedMs:
-          Date.now() -
-          started
-      });
+          timeBudgetMs:
+            DISCOVERY_BUDGET_MS,
+
+          elapsedMs:
+            Date.now() -
+            requestStarted,
+
+          remainingBudgetMs:
+            Math.max(
+              0,
+              scanDeadline -
+                Date.now()
+            ),
+
+          rdapFailures:
+            failed
+              .slice(0, 50)
+              .map(
+                item => ({
+                  domain:
+                    item.domain,
+
+                  reason:
+                    item.reason,
+
+                  error:
+                    item.error,
+
+                  diagnostic:
+                    item.diagnostic ||
+                    null
+                })
+              )
+        }
+      }
+    );
 
   } catch (error) {
-    return res
-      .status(500)
-      .json({
+    /*
+     * CRITICAL:
+     * Never allow an exception to become a Vercel HTML
+     * error page. Always return structured JSON.
+     */
+
+    console.error(
+      "LD76 DISCOVERY FATAL ERROR",
+      error
+    );
+
+    return sendJson(
+      res,
+      500,
+      {
         ok: false,
 
         stage:
           "discovery",
 
         error:
-          error?.message ||
-          "Discovery failed",
+          errorMessage(error),
 
-        elapsedMs:
-          Date.now() -
-          started
-      });
+        diagnostic: {
+          errorName:
+            error?.name ||
+            "Error",
+
+          elapsedMs:
+            Date.now() -
+            requestStarted,
+
+          stack:
+            process.env.NODE_ENV !==
+            "production"
+              ? error?.stack ||
+                null
+              : null
+        }
+      }
+    );
   }
-              }
+  }
