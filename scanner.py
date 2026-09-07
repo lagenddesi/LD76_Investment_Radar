@@ -1,4 +1,3 @@
-import threading
 import uuid
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,12 +20,15 @@ def _fetch(url):
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "LD76-Investment-Radar/1.0",
-            "Accept": "text/plain",
+            "User-Agent": "LD76-Investment-Radar/2.0",
+            "Accept": "text/plain,*/*",
         },
     )
 
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with urllib.request.urlopen(
+        request,
+        timeout=60,
+    ) as response:
         return response.read().decode(
             "utf-8",
             "ignore",
@@ -39,14 +41,21 @@ def _domains(period, tld):
     if period not in FEEDS:
         period = 1
 
-    data = _fetch(FEEDS[period])
+    data = _fetch(
+        FEEDS[period]
+    )
 
     domains = []
 
     suffix = None
 
     if tld and tld != "all":
-        suffix = "." + str(tld).lstrip(".").lower()
+        suffix = (
+            "."
+            + str(tld)
+            .lstrip(".")
+            .lower()
+        )
 
     for line in data.splitlines():
         domain = line.strip().lower()
@@ -60,7 +69,9 @@ def _domains(period, tld):
         if "." not in domain:
             continue
 
-        if suffix and not domain.endswith(suffix):
+        if suffix and not domain.endswith(
+            suffix
+        ):
             continue
 
         domains.append(domain)
@@ -68,17 +79,43 @@ def _domains(period, tld):
         if len(domains) >= MAX_DOMAINS:
             break
 
-    return list(dict.fromkeys(domains))
+    return list(
+        dict.fromkeys(domains)
+    )
 
 
 def _scan_one(domain):
     try:
-        return detect_investment(domain)
-    except Exception:
-        return None
+        result = detect_investment(
+            domain
+        )
+
+        if result:
+            return {
+                "domain": domain,
+                "status": "matched",
+                "result": result,
+            }
+
+        return {
+            "domain": domain,
+            "status": "rejected",
+            "result": None,
+        }
+
+    except Exception as exc:
+        return {
+            "domain": domain,
+            "status": "error",
+            "result": None,
+            "error": str(exc),
+        }
 
 
-def scan_domains(period=1, tld="all"):
+def scan_domains(
+    period=1,
+    tld="all",
+):
     scan_id = uuid.uuid4().hex
 
     try:
@@ -93,15 +130,24 @@ def scan_domains(period=1, tld="all"):
             return {
                 "scan_id": scan_id,
                 "status": "completed",
-                "message": "No newly registered domains found.",
+                "message": (
+                    "No newly registered "
+                    "domains found."
+                ),
                 "total": 0,
                 "checked": 0,
                 "found": 0,
+                "fetch_failed": 0,
+                "rejected": 0,
+                "errors": 0,
                 "results": [],
             }
 
         results = []
         checked = 0
+        fetch_failed = 0
+        rejected = 0
+        errors = 0
 
         workers = min(
             MAX_WORKERS,
@@ -120,17 +166,36 @@ def scan_domains(period=1, tld="all"):
                 for domain in domains
             }
 
-            for future in as_completed(futures):
+            for future in as_completed(
+                futures
+            ):
                 checked += 1
 
                 try:
-                    result = future.result()
+                    item = future.result()
 
-                    if result:
-                        results.append(result)
+                    status = item.get(
+                        "status"
+                    )
+
+                    if status == "matched":
+                        result = item.get(
+                            "result"
+                        )
+
+                        if result:
+                            results.append(
+                                result
+                            )
+
+                    elif status == "rejected":
+                        rejected += 1
+
+                    else:
+                        errors += 1
 
                 except Exception:
-                    pass
+                    errors += 1
 
         results.sort(
             key=lambda item: item.get(
@@ -147,6 +212,9 @@ def scan_domains(period=1, tld="all"):
             "total": total,
             "checked": checked,
             "found": len(results),
+            "fetch_failed": fetch_failed,
+            "rejected": rejected,
+            "errors": errors,
             "results": results,
         }
 
@@ -159,5 +227,8 @@ def scan_domains(period=1, tld="all"):
             "total": 0,
             "checked": 0,
             "found": 0,
+            "fetch_failed": 0,
+            "rejected": 0,
+            "errors": 1,
             "results": [],
         }
