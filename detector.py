@@ -1,541 +1,838 @@
 import re
-import urllib.request
-from html import unescape
+import requests
+from bs4 import BeautifulSoup
 
 
-POS = {
-    "investment": 5,
-    "invest": 4,
-    "investing": 4,
-    "investment plan": 10,
-    "investment package": 10,
-    "investment program": 9,
-    "investment opportunity": 9,
-    "minimum investment": 9,
-    "investment amount": 8,
-    "investment period": 7,
-    "investment term": 7,
-    "expected return": 8,
-    "return on investment": 8,
-    "roi": 7,
-    "profit percentage": 9,
-    "profit rate": 8,
-    "daily profit": 10,
-    "weekly profit": 9,
-    "monthly profit": 9,
-    "fixed return": 9,
-    "guaranteed return": 10,
-    "passive income": 8,
-    "capital investment": 8,
-    "invest now": 9,
-    "start investing": 9,
-    "choose plan": 8,
-    "make deposit": 8,
-    "deposit funds": 8,
-    "fund account": 7,
-    "invest amount": 9,
-    "subscribe plan": 8,
-    "buy investment plan": 10,
-    "payment method": 4,
-    "wallet address": 5,
-    "transaction id": 5,
-    "transaction hash": 5,
-    "referral commission": 7,
-    "referral bonus": 6,
-    "referral income": 7,
-    "affiliate commission": 5,
-    "team commission": 6,
-    "referral earnings": 6,
-    "investment dashboard": 9,
-    "earning dashboard": 7,
-    "my investments": 9,
-    "active investment": 9,
-    "investment history": 8,
-    "minimum deposit": 7,
-    "minimum withdrawal": 5,
-    "withdraw profit": 8,
-    "trading platform": 7,
-    "trading account": 6,
-    "forex": 6,
-    "crypto investment": 9,
-    "cloud mining": 9,
-    "mining investment": 9,
-    "staking": 7,
-    "liquidity pool": 7,
-    "defi": 7,
+TIMEOUT = 8
+MAX_BYTES = 800_000
+
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
+    )
 }
 
 
-PAY = [
-    "usdt",
-    "usdc",
-    "btc",
-    "bitcoin",
-    "eth",
-    "ethereum",
-    "trx",
-    "crypto",
-    "cryptocurrency",
-    "bank transfer",
-    "wallet",
-    "deposit",
-    "withdraw",
-    "withdrawal",
-    "payment",
+# Strong signals: direct evidence that the website is related
+# to investing, earning, trading, finance or money services.
+STRONG_SIGNALS = {
+    "investment": [
+        "investment plan",
+        "investment plans",
+        "investment program",
+        "investment programs",
+        "investment opportunity",
+        "investment opportunities",
+        "invest now",
+        "start investing",
+        "online investment",
+        "investment platform",
+        "investment account",
+        "investing platform",
+        "investing opportunity",
+        "minimum investment",
+        "investment package",
+        "investment packages",
+        "investment return",
+        "investment returns",
+    ],
+    "profit": [
+        "guaranteed return",
+        "guaranteed returns",
+        "high return",
+        "high returns",
+        "daily profit",
+        "weekly profit",
+        "monthly profit",
+        "daily earnings",
+        "weekly earnings",
+        "monthly earnings",
+        "passive income",
+        "profit sharing",
+        "profit percentage",
+        "profit rate",
+        "return on investment",
+        "roi",
+        "high yield",
+        "fixed return",
+        "fixed returns",
+    ],
+    "trading": [
+        "forex trading",
+        "forex broker",
+        "forex platform",
+        "trading platform",
+        "trading account",
+        "copy trading",
+        "crypto trading",
+        "stock trading",
+        "trading signals",
+        "trading bot",
+        "automated trading",
+        "binary trading",
+    ],
+    "crypto": [
+        "bitcoin",
+        "ethereum",
+        "cryptocurrency",
+        "cryptocurrencies",
+        "crypto investment",
+        "crypto investing",
+        "crypto exchange",
+        "crypto trading",
+        "usdt",
+        "usdc",
+        "binance",
+        "staking",
+        "defi",
+        "liquidity pool",
+        "crypto mining",
+        "bitcoin mining",
+    ],
+    "finance": [
+        "wealth management",
+        "asset management",
+        "portfolio management",
+        "financial services",
+        "financial investment",
+        "investment fund",
+        "mutual fund",
+        "hedge fund",
+        "capital management",
+        "fund management",
+        "wealth investment",
+        "financial platform",
+    ],
+    "money": [
+        "deposit",
+        "withdrawal",
+        "withdraw",
+        "deposit funds",
+        "fund your account",
+        "wallet",
+        "payment",
+        "payout",
+        "earn money",
+        "make money",
+        "earn online",
+        "income",
+    ],
+}
+
+
+# Medium signals. These are useful when combined with stronger signals.
+MEDIUM_SIGNALS = {
+    "investment": [
+        "invest",
+        "investing",
+        "investor",
+        "investors",
+        "investment",
+        "investments",
+        "portfolio",
+        "assets",
+        "capital",
+        "returns",
+        "yield",
+    ],
+    "profit": [
+        "profit",
+        "profits",
+        "earning",
+        "earnings",
+        "revenue",
+        "income",
+        "roi",
+        "interest",
+        "yield",
+    ],
+    "trading": [
+        "trade",
+        "trader",
+        "trading",
+        "forex",
+        "stocks",
+        "shares",
+        "market",
+        "signals",
+        "broker",
+    ],
+    "crypto": [
+        "crypto",
+        "bitcoin",
+        "ethereum",
+        "blockchain",
+        "token",
+        "tokens",
+        "coin",
+        "coins",
+        "staking",
+        "mining",
+        "defi",
+    ],
+    "finance": [
+        "finance",
+        "financial",
+        "fund",
+        "funds",
+        "banking",
+        "wealth",
+        "asset",
+        "assets",
+        "loan",
+        "lending",
+        "credit",
+        "money",
+    ],
+    "action": [
+        "register",
+        "signup",
+        "sign up",
+        "login",
+        "account",
+        "dashboard",
+        "join",
+        "get started",
+        "start now",
+        "referral",
+        "affiliate",
+        "commission",
+    ],
+}
+
+
+# Negative signals are now PENALTIES instead of hard rejection.
+# This prevents a legitimate page from automatically becoming score 0.
+NEGATIVE_SIGNALS = [
+    ("domain for sale", 35),
+    ("buy this domain", 35),
+    ("this domain is available", 35),
+    ("premium domain", 30),
+    ("domain auction", 30),
+    ("domain marketplace", 30),
+    ("domain broker", 30),
+    ("parked domain", 30),
+    ("parking page", 30),
+    ("under construction", 18),
+    ("coming soon", 15),
+    ("default hosting page", 30),
+    ("no website", 25),
 ]
 
 
-ACC = [
-    "signup",
-    "sign up",
-    "register",
-    "registration",
-    "login",
-    "referral",
-    "referral code",
-    "invite link",
-    "create account",
-    "open account",
-]
-
-
-MONEY = [
-    "deposit",
-    "minimum deposit",
-    "minimum investment",
-    "investment amount",
-    "profit",
-    "profit percentage",
-    "profit rate",
-    "daily profit",
-    "weekly profit",
-    "monthly profit",
-    "return",
-    "roi",
-    "earnings",
-    "earning",
-    "withdraw",
-    "withdrawal",
-]
-
-
-ACTION = [
-    "invest now",
-    "start investing",
-    "make deposit",
-    "deposit funds",
-    "choose plan",
-    "investment amount",
-    "create account",
-    "open account",
-    "register",
-    "sign up",
-    "login",
-    "deposit",
-]
-
-
-BAD = [
-    "domain for sale",
-    "buy this domain",
-    "this domain is available",
-    "premium domain",
-    "domain auction",
-    "domain marketplace",
-    "domain broker",
-    "parked domain",
-    "parking page",
-    "coming soon",
-    "under construction",
-    "default hosting page",
-    "no website",
-]
+CATEGORY_NAMES = {
+    "investment": "Investment",
+    "profit": "Profit / ROI",
+    "trading": "Trading",
+    "crypto": "Crypto",
+    "finance": "Finance",
+    "money": "Money / Payments",
+    "action": "Platform / Account",
+}
 
 
 def _fetch(domain):
-    last_error = ""
+    """
+    Fetch a domain using HTTPS first and HTTP as fallback.
+    """
+    domain = domain.strip().lower()
 
-    for scheme in (
-        "https://",
-        "http://",
-    ):
+    if not domain:
+        return {
+            "status": "fetch_failed",
+            "domain": domain,
+            "error": "empty domain",
+        }
+
+    urls = [
+        f"https://{domain}",
+        f"http://{domain}",
+    ]
+
+    last_error = "unknown error"
+
+    for url in urls:
         try:
-            request = urllib.request.Request(
-                scheme + domain,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 "
-                        "(Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 "
-                        "Chrome/131 Safari/537.36 "
-                        "LD76-Investment-Radar/3.0"
-                    ),
-                    "Accept": (
-                        "text/html,"
-                        "application/xhtml+xml,"
-                        "application/xml;q=0.9,"
-                        "*/*;q=0.8"
-                    ),
-                },
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=TIMEOUT,
+                allow_redirects=True,
+                verify=True,
             )
 
-            with urllib.request.urlopen(
-                request,
-                timeout=8,
-            ) as response:
+            content = response.content[:MAX_BYTES]
 
-                content_type = (
-                    response.headers.get(
-                        "Content-Type",
-                        "",
-                    ).lower()
-                )
+            if not content:
+                last_error = "empty response"
+                continue
 
-                if (
-                    content_type
-                    and "html" not in content_type
-                    and "text/plain" not in content_type
-                    and "text/" not in content_type
-                ):
-                    return {
-                        "status": "fetch_failed",
-                        "url": None,
-                        "html": "",
-                        "error": (
-                            "Unsupported content type: "
-                            + content_type
-                        ),
-                    }
-
-                html = response.read(
-                    800000
-                ).decode(
-                    "utf-8",
-                    "ignore",
-                )
-
-                if not html.strip():
-                    return {
-                        "status": "fetch_failed",
-                        "url": response.geturl(),
-                        "html": "",
-                        "error": "Empty response",
-                    }
-
-                return {
-                    "status": "fetched",
-                    "url": response.geturl(),
-                    "html": html,
-                    "error": "",
-                }
+            return {
+                "status": "fetched",
+                "domain": domain,
+                "url": response.url,
+                "status_code": response.status_code,
+                "content_type": response.headers.get(
+                    "content-type",
+                    ""
+                ),
+                "content": content,
+            }
 
         except Exception as exc:
             last_error = str(exc)
 
     return {
         "status": "fetch_failed",
-        "url": None,
-        "html": "",
-        "error": last_error or "Unable to fetch website",
+        "domain": domain,
+        "error": last_error,
     }
 
 
-def _text(html):
-    html = re.sub(
-        r"<script[\s\S]*?</script>",
-        " ",
-        html,
-        flags=re.I,
+def _extract_page(content):
+    """
+    Extract title, meta information and visible page text.
+    Investment websites often put their important keywords
+    in <title> or <meta> even when the visible page is JS-heavy.
+    """
+    if not content:
+        return {
+            "title": "",
+            "meta": "",
+            "text": "",
+        }
+
+    try:
+        html = content.decode(
+            "utf-8",
+            errors="ignore"
+        )
+    except Exception:
+        html = str(content)
+
+    try:
+        soup = BeautifulSoup(
+            html,
+            "html.parser"
+        )
+
+        title = ""
+
+        if soup.title:
+            title = soup.title.get_text(
+                " ",
+                strip=True
+            )
+
+        meta_parts = []
+
+        for tag in soup.find_all("meta"):
+            name = (
+                tag.get("name")
+                or tag.get("property")
+                or ""
+            ).lower()
+
+            if name in {
+                "description",
+                "keywords",
+                "og:title",
+                "og:description",
+                "twitter:title",
+                "twitter:description",
+            }:
+                value = tag.get(
+                    "content",
+                    ""
+                )
+
+                if value:
+                    meta_parts.append(value)
+
+        for tag in soup([
+            "script",
+            "style",
+            "noscript",
+            "svg",
+            "template",
+        ]):
+            tag.decompose()
+
+        text = soup.get_text(
+            " ",
+            strip=True
+        )
+
+        return {
+            "title": title,
+            "meta": " ".join(meta_parts),
+            "text": text,
+        }
+
+    except Exception:
+        # Fallback parser for malformed HTML.
+        text = re.sub(
+            r"<[^>]+>",
+            " ",
+            html
+        )
+
+        text = re.sub(
+            r"\s+",
+            " ",
+            text
+        ).strip()
+
+        return {
+            "title": "",
+            "meta": "",
+            "text": text,
+        }
+
+
+def _normalise(text):
+    text = text.lower()
+
+    text = text.replace(
+        "\u00a0",
+        " "
     )
 
-    html = re.sub(
-        r"<style[\s\S]*?</style>",
-        " ",
-        html,
-        flags=re.I,
-    )
-
-    html = re.sub(
-        r"<noscript[\s\S]*?</noscript>",
-        " ",
-        html,
-        flags=re.I,
-    )
-
-    html = re.sub(
-        r"<svg[\s\S]*?</svg>",
-        " ",
-        html,
-        flags=re.I,
-    )
-
-    html = re.sub(
-        r"<[^>]+>",
-        " ",
-        html,
-    )
-
-    html = unescape(html)
-
-    return re.sub(
+    text = re.sub(
         r"\s+",
         " ",
-        html,
-    ).strip().lower()
-
-
-def _score(text):
-    if not text:
-        return 0, []
-
-    bad_hits = [
-        phrase
-        for phrase in BAD
-        if phrase in text
-    ]
-
-    if bad_hits:
-        return 0, []
-
-    hits = []
-    score = 0
-
-    for phrase, weight in POS.items():
-        if phrase in text:
-            score += weight
-            hits.append(phrase)
-
-    pay_hits = [
-        item
-        for item in PAY
-        if item in text
-    ]
-
-    acc_hits = [
-        item
-        for item in ACC
-        if item in text
-    ]
-
-    money_hits = [
-        item
-        for item in MONEY
-        if item in text
-    ]
-
-    action_hits = [
-        item
-        for item in ACTION
-        if item in text
-    ]
-
-    score += min(
-        len(pay_hits) * 2,
-        10,
+        text
     )
 
-    score += min(
-        len(acc_hits) * 2,
-        8,
+    return text.strip()
+
+
+def _contains_signal(text, phrase):
+    """
+    Phrase matching with a little protection against
+    accidental substring matches for short words.
+    """
+    phrase = phrase.lower().strip()
+
+    if not phrase:
+        return False
+
+    # Short/generic words should be matched as complete words.
+    if len(phrase.split()) == 1 and len(phrase) <= 7:
+        return re.search(
+            rf"\b{re.escape(phrase)}\b",
+            text
+        ) is not None
+
+    return phrase in text
+
+
+def _score(page):
+    title = _normalise(
+        page.get("title", "")
     )
 
-    investment_family = any(
-        item in text
-        for item in (
-            "investment",
-            "investing",
-            "invest now",
-            "investment plan",
-            "investment package",
-            "investment program",
-            "profit rate",
-            "daily profit",
-            "passive income",
-            "capital investment",
-            "crypto investment",
-            "cloud mining",
-            "mining investment",
+    meta = _normalise(
+        page.get("meta", "")
+    )
+
+    text = _normalise(
+        page.get("text", "")
+    )
+
+    # Give title/meta more importance because many modern
+    # websites expose little useful visible text.
+    combined = " ".join([
+        title,
+        meta,
+        text,
+    ])
+
+    scores = {}
+    evidence = []
+    matched_categories = set()
+
+    # ---------------------------------------------------------
+    # Strong signals
+    # ---------------------------------------------------------
+
+    for category, phrases in STRONG_SIGNALS.items():
+        category_score = 0
+
+        for phrase in phrases:
+            if _contains_signal(
+                combined,
+                phrase
+            ):
+                weight = 8
+
+                # Title/meta signals are stronger.
+                if _contains_signal(title, phrase):
+                    weight += 5
+
+                elif _contains_signal(meta, phrase):
+                    weight += 3
+
+                category_score += weight
+
+                evidence.append({
+                    "signal": phrase,
+                    "category": CATEGORY_NAMES.get(
+                        category,
+                        category
+                    ),
+                    "strength": "strong",
+                })
+
+                matched_categories.add(
+                    category
+                )
+
+        if category_score:
+            # Avoid one category producing an enormous score.
+            scores[category] = min(
+                category_score,
+                30
+            )
+
+    # ---------------------------------------------------------
+    # Medium signals
+    # ---------------------------------------------------------
+
+    for category, phrases in MEDIUM_SIGNALS.items():
+        category_score = scores.get(
+            category,
+            0
         )
+
+        found_here = 0
+
+        for phrase in phrases:
+            if _contains_signal(
+                combined,
+                phrase
+            ):
+                found_here += 1
+
+                weight = 3
+
+                if _contains_signal(title, phrase):
+                    weight += 3
+
+                elif _contains_signal(meta, phrase):
+                    weight += 2
+
+                category_score += weight
+
+                # Don't flood the result with hundreds
+                # of repeated generic terms.
+                if len(evidence) < 25:
+                    evidence.append({
+                        "signal": phrase,
+                        "category": CATEGORY_NAMES.get(
+                            category,
+                            category
+                        ),
+                        "strength": "medium",
+                    })
+
+                matched_categories.add(
+                    category
+                )
+
+        if found_here:
+            scores[category] = min(
+                category_score,
+                30
+            )
+
+    # ---------------------------------------------------------
+    # Negative signals
+    # ---------------------------------------------------------
+
+    penalty = 0
+    negative_matches = []
+
+    for phrase, points in NEGATIVE_SIGNALS:
+        if _contains_signal(
+            combined,
+            phrase
+        ):
+            penalty += points
+            negative_matches.append(
+                phrase
+            )
+
+    # ---------------------------------------------------------
+    # Context bonuses
+    # ---------------------------------------------------------
+
+    total = sum(
+        scores.values()
     )
 
-    financial_family = bool(
-        money_hits
-        or pay_hits
+    # Multiple different financial categories are much
+    # stronger evidence than a single generic keyword.
+    category_count = len(
+        matched_categories
     )
 
-    action_family = bool(
-        action_hits
-        or acc_hits
-    )
+    if category_count >= 2:
+        total += 8
 
-    if investment_family:
-        score += 5
+    if category_count >= 3:
+        total += 8
 
-    if investment_family and financial_family:
-        score += 8
+    if category_count >= 4:
+        total += 10
 
+    # Action + financial language is a strong website signal.
     if (
-        investment_family
-        and action_family
-        and financial_family
-    ):
-        score += 8
-
-    if (
-        "investment" in text
+        "action" in matched_categories
         and (
-            "profit" in text
-            or "return" in text
-            or "earn" in text
+            "investment" in matched_categories
+            or "trading" in matched_categories
+            or "crypto" in matched_categories
+            or "finance" in matched_categories
+            or "profit" in matched_categories
         )
     ):
-        score += 8
+        total += 8
+
+    # Direct money movement signals become stronger when
+    # combined with an actual financial category.
+    if (
+        "money" in matched_categories
+        and (
+            "investment" in matched_categories
+            or "trading" in matched_categories
+            or "crypto" in matched_categories
+            or "finance" in matched_categories
+            or "profit" in matched_categories
+        )
+    ):
+        total += 8
+
+    # Title/meta bonus.
+    title_meta = " ".join([
+        title,
+        meta,
+    ])
+
+    title_meta_hits = 0
+
+    for phrase_list in STRONG_SIGNALS.values():
+        for phrase in phrase_list:
+            if _contains_signal(
+                title_meta,
+                phrase
+            ):
+                title_meta_hits += 1
+
+    if title_meta_hits:
+        total += min(
+            title_meta_hits * 4,
+            16
+        )
+
+    total -= penalty
+
+    total = max(
+        0,
+        total
+    )
+
+    # ---------------------------------------------------------
+    # Detection rule
+    # ---------------------------------------------------------
+    #
+    # We deliberately don't require a very high score.
+    # A website can be a real investment/trading platform
+    # while having a short or JS-heavy homepage.
+    #
+    # Requirements:
+    #
+    # 1. At least one strong financial signal plus another
+    #    supporting category, OR
+    #
+    # 2. At least three independent categories, OR
+    #
+    # 3. Very strong direct investment/profit evidence.
+    # ---------------------------------------------------------
+
+    financial_categories = {
+        "investment",
+        "profit",
+        "trading",
+        "crypto",
+        "finance",
+    }
+
+    financial_count = len(
+        matched_categories.intersection(
+            financial_categories
+        )
+    )
+
+    strong_evidence_count = sum(
+        1
+        for item in evidence
+        if item["strength"] == "strong"
+    )
+
+    qualifies = False
 
     if (
-        "deposit" in text
-        and (
-            "profit" in text
-            or "investment" in text
-            or "return" in text
-        )
+        financial_count >= 2
+        and total >= 14
     ):
-        score += 8
+        qualifies = True
 
-    unique_hits = []
-
-    for item in (
-        hits
-        + pay_hits
-        + acc_hits
-        + money_hits
-        + action_hits
+    elif (
+        strong_evidence_count >= 2
+        and financial_count >= 1
+        and total >= 12
     ):
-        if item not in unique_hits:
-            unique_hits.append(item)
+        qualifies = True
 
-    return score, unique_hits
+    elif (
+        financial_count >= 1
+        and "money" in matched_categories
+        and total >= 16
+    ):
+        qualifies = True
+
+    # A parked/for-sale page with no real financial evidence
+    # must never be classified as an investment website.
+    if (
+        negative_matches
+        and financial_count == 0
+    ):
+        qualifies = False
+
+    # ---------------------------------------------------------
+    # Category selection
+    # ---------------------------------------------------------
+
+    category = "Other"
+
+    priority = [
+        "investment",
+        "crypto",
+        "trading",
+        "profit",
+        "finance",
+        "money",
+    ]
+
+    for item in priority:
+        if item in matched_categories:
+            category = CATEGORY_NAMES.get(
+                item,
+                item
+            )
+            break
+
+    return {
+        "score": total,
+        "category": category,
+        "matched_categories": [
+            CATEGORY_NAMES.get(
+                item,
+                item
+            )
+            for item in sorted(
+                matched_categories
+            )
+        ],
+        "evidence": evidence[:20],
+        "negative_signals": negative_matches,
+        "qualifies": qualifies,
+    }
 
 
 def detect_investment(domain):
-    fetched = _fetch(domain)
+    """
+    Public detector function used by scanner.py.
+    The return structure intentionally remains compatible
+    with the existing scanner.
+    """
+    domain = (
+        domain
+        or ""
+    ).strip().lower()
+
+    fetched = _fetch(
+        domain
+    )
 
     if fetched["status"] != "fetched":
         return {
             "status": "fetch_failed",
             "domain": domain,
-            "result": None,
-            "error": fetched["error"],
+            "error": fetched.get(
+                "error",
+                "fetch failed"
+            ),
         }
 
-    html = fetched["html"]
-    url = fetched["url"]
-
-    text = _text(html)
-
-    if len(text) < 40:
-        return {
-            "status": "rejected",
-            "domain": domain,
-            "result": None,
-            "reason": "Website content too short",
-        }
-
-    score, hits = _score(text)
-
-    if score < 18:
-        return {
-            "status": "rejected",
-            "domain": domain,
-            "result": None,
-            "reason": "Investment score below threshold",
-        }
-
-    title = ""
-
-    match = re.search(
-        r"<title[^>]*>(.*?)</title>",
-        html,
-        re.I | re.S,
+    page = _extract_page(
+        fetched.get(
+            "content",
+            b""
+        )
     )
 
-    if match:
-        title = re.sub(
-            r"\s+",
-            " ",
-            unescape(
-                match.group(1)
+    result = _score(
+        page
+    )
+
+    if not result["qualifies"]:
+        return {
+            "status": "rejected",
+            "domain": domain,
+            "score": result["score"],
+            "category": result["category"],
+            "matched_categories": result[
+                "matched_categories"
+            ],
+            "evidence": result[
+                "evidence"
+            ],
+            "negative_signals": result[
+                "negative_signals"
+            ],
+            "url": fetched.get(
+                "url",
+                ""
             ),
-        ).strip()
-
-    category = "General Investment"
-
-    categories = {
-        "Crypto Investment": [
-            "usdt",
-            "usdc",
-            "bitcoin",
-            "btc",
-            "ethereum",
-            "eth",
-            "crypto",
-            "cryptocurrency",
-        ],
-        "Forex Investment": [
-            "forex",
-            "currency trading",
-            "fx trading",
-        ],
-        "Real Estate Investment": [
-            "real estate",
-            "property investment",
-            "property investing",
-        ],
-        "Trading Investment": [
-            "trading platform",
-            "trading account",
-            "trading investment",
-        ],
-        "Mining Investment": [
-            "cloud mining",
-            "mining investment",
-            "mining plan",
-        ],
-        "DeFi Investment": [
-            "defi",
-            "liquidity pool",
-            "staking",
-        ],
-        "Lending Investment": [
-            "lending",
-            "loan investment",
-            "p2p lending",
-        ],
-    }
-
-    for name, words in categories.items():
-        if any(
-            word in text
-            for word in words
-        ):
-            category = name
-            break
-
-    result = {
-        "domain": domain,
-        "site_name": title or domain,
-        "url": url,
-        "score": min(score, 100),
-        "confidence": (
-            "high"
-            if score >= 45
-            else "medium"
-        ),
-        "category": category,
-        "evidence": hits[:20],
-    }
+        }
 
     return {
         "status": "matched",
         "domain": domain,
-        "result": result,
-    }
+        "result": {
+            "score": result["score"],
+            "category": result["category"],
+            "matched_categories": result[
+                "matched_categories"
+            ],
+            "evidence": result[
+                "evidence"
+            ],
+            "negative_signals": result[
+                "negative_signals"
+            ],
+            "url": fetched.get(
+                "url",
+                ""
+            ),
+            "title": page.get(
+                "title",
+                ""
+            ),
+        },
+                }
