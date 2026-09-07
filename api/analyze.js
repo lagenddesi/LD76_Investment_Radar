@@ -2,87 +2,89 @@
 
 /*
  * LD76 INVESTMENT RADAR
- * Gemini Analysis API
+ * =====================
+ * GEMINI FINAL ANALYSIS
  *
- * - Gemini 3.6 Flash
- * - No arbitrary 4/5 candidate limit
- * - Up to 30 candidates per Gemini request
- * - Larger scans are automatically batched
- * - Only valid Gemini results are returned
- * - API key is never exposed to client
+ * Scanner evidence collect karta hai.
+ * Ye file sirf Gemini ko evidence deti hai.
+ *
+ * Gemini:
+ * - scamScore 0-100
+ * - red flags
+ * - positive signals
+ * - missing information
+ * - investment claims
+ * - payment methods
+ *
+ * IMPORTANT:
+ * - Investment website automatically scam nahi.
+ * - Payment method automatically scam nahi.
+ * - Missing information automatically scam nahi.
+ * - Gemini result valid JSON hona zaroori hai.
+ * - Invalid Gemini result ko successful analysis nahi maana jayega.
  */
 
-const DEFAULT_MODEL = "gemini-3.6-flash";
+const DEFAULT_MODEL =
+  "gemini-2.5-flash";
 
-const MAX_CANDIDATES_PER_REQUEST = 30;
+const MAX_CANDIDATES_PER_REQUEST =
+  20;
 
-const MAX_EVIDENCE_CHARS = 12000;
+const MAX_EVIDENCE_CHARS =
+  10000;
 
-const GEMINI_TIMEOUT_MS = 30000;
+const GEMINI_TIMEOUT_MS =
+  30000;
 
-const MAX_RETRIES = 1;
+const MAX_RETRIES =
+  1;
 
 
 /* =========================================================
    MAIN HANDLER
 ========================================================= */
 
-export default async function handler(req, res) {
-  const startedAt = Date.now();
+export default async function handler(
+  req,
+  res
+) {
+  const startedAt =
+    Date.now();
 
-  if (req.method !== "POST") {
+  if (
+    req.method !== "POST"
+  ) {
     return res.status(405).json({
       ok: false,
       stage: "gemini-api",
-      error: "Method not allowed. Use POST.",
-      diagnostic: {
-        stage: "gemini-api",
-        reason: "METHOD_NOT_ALLOWED",
-        httpStatus: 405
-      }
+      error:
+        "Method not allowed. Use POST."
     });
   }
 
-  const apiKey = String(
-    process.env.GEMINI_API_KEY || ""
-  ).trim();
-
-  const explicitlyDisabled =
+  const apiKey =
     String(
-      process.env.GEMINI_ENABLED || ""
-    ).toLowerCase() === "false";
+      process.env.GEMINI_API_KEY || ""
+    ).trim();
 
-  const model = String(
-    process.env.GEMINI_MODEL ||
-      DEFAULT_MODEL
-  ).trim();
+  const model =
+    String(
+      process.env.GEMINI_MODEL ||
+        DEFAULT_MODEL
+    ).trim();
+
+  const enabled =
+    String(
+      process.env.GEMINI_ENABLED ||
+        "true"
+    ).toLowerCase() !== "false";
 
 
   /* =======================================================
-     CONFIGURATION
+     CONFIG
   ======================================================= */
 
-  if (!apiKey) {
-    return res.status(503).json({
-      ok: false,
-      enabled: false,
-      stage: "gemini-configuration",
-      requestCount: 0,
-      submittedCount: 0,
-      resultCount: 0,
-      results: [],
-      error:
-        "Gemini API key is missing. Add GEMINI_API_KEY in Vercel Environment Variables and redeploy.",
-      diagnostic: {
-        stage: "gemini-configuration",
-        reason: "GEMINI_API_KEY_MISSING",
-        model,
-        elapsedMs: Date.now() - startedAt
-      }
-    });
-  }
-
-  if (explicitlyDisabled) {
+  if (!enabled) {
     return res.status(200).json({
       ok: true,
       enabled: false,
@@ -92,12 +94,23 @@ export default async function handler(req, res) {
       resultCount: 0,
       results: [],
       message:
-        "Gemini is disabled because GEMINI_ENABLED=false.",
-      diagnostic: {
-        stage: "gemini-disabled",
-        reason: "GEMINI_ENABLED_FALSE",
-        model
-      }
+        "Gemini is disabled."
+    });
+  }
+
+
+  if (!apiKey) {
+    return res.status(503).json({
+      ok: false,
+      enabled: false,
+      stage:
+        "gemini-configuration",
+      error:
+        "GEMINI_API_KEY is missing.",
+      requestCount: 0,
+      submittedCount: 0,
+      resultCount: 0,
+      results: []
     });
   }
 
@@ -108,23 +121,19 @@ export default async function handler(req, res) {
 
   try {
     const body =
-      req.body && typeof req.body === "object"
-        ? req.body
-        : {};
+      parseBody(req);
 
-    /*
-     * IMPORTANT:
-     * candidates is declared here and passed explicitly
-     * to every function that needs it.
-     */
+    const candidates =
+      Array.isArray(
+        body.candidates
+      )
+        ? body.candidates
+        : [];
 
-    const candidates = Array.isArray(
-      body.candidates
-    )
-      ? body.candidates
-      : [];
 
-    if (candidates.length === 0) {
+    if (
+      candidates.length === 0
+    ) {
       return res.status(200).json({
         ok: true,
         enabled: true,
@@ -134,108 +143,78 @@ export default async function handler(req, res) {
         resultCount: 0,
         results: [],
         message:
-          "No candidates were supplied to Gemini.",
-        diagnostic: {
-          stage: "gemini-input",
-          reason: "NO_CANDIDATES",
-          model
-        }
+          "No candidates were supplied."
       });
     }
 
 
-    /* =====================================================
-       BATCHING
+    /*
+     * No arbitrary 4/5 site limit.
+     *
+     * Large scans are automatically divided
+     * into batches.
+     */
 
-       1-30   = 1 request
-       31-60  = 2 requests
-       61-90  = 3 requests
-       etc.
-
-       NO arbitrary 4/5 site limit.
-    ===================================================== */
-
-    const batches = createBatches(
-      candidates,
-      MAX_CANDIDATES_PER_REQUEST
-    );
+    const batches =
+      createBatches(
+        candidates,
+        MAX_CANDIDATES_PER_REQUEST
+      );
 
     const allResults = [];
 
-    let attemptedRequests = 0;
+    let requestCount = 0;
 
 
-    /* =====================================================
-       GEMINI REQUEST LOOP
-    ===================================================== */
+    /* =======================================================
+       GEMINI BATCHES
+    ======================================================= */
 
     for (
-      let batchIndex = 0;
-      batchIndex < batches.length;
-      batchIndex++
+      let i = 0;
+      i < batches.length;
+      i++
     ) {
-      const batch = batches[batchIndex];
+      const batch =
+        batches[i];
 
-      attemptedRequests++;
-
-      console.log(
-        "[LD76][GEMINI] Starting batch",
-        {
-          batch: batchIndex + 1,
-          totalBatches: batches.length,
-          candidateCount: batch.length,
-          model
-        }
-      );
+      requestCount++;
 
       try {
-        const batchResults =
+        const results =
           await analyzeBatch({
             candidates: batch,
             apiKey,
             model
           });
 
-        if (Array.isArray(batchResults)) {
-          allResults.push(
-            ...batchResults
-          );
-        }
-
-        console.log(
-          "[LD76][GEMINI] Batch complete",
-          {
-            batch: batchIndex + 1,
-            resultCount:
-              Array.isArray(batchResults)
-                ? batchResults.length
-                : 0
+        if (
+          Array.isArray(results)
+        ) {
+          for (
+            const result of results
+          ) {
+            allResults.push(
+              result
+            );
           }
-        );
+        }
 
       } catch (error) {
         console.error(
           "[LD76][GEMINI] Batch failed",
-          {
-            batch: batchIndex + 1,
-            error:
-              error?.message ||
-              "Unknown Gemini error"
-          }
+          error
         );
 
-        const diagnostic =
-          error?.diagnostic || {};
-
         return res.status(
-          Number(error?.httpStatus) || 502
+          error.httpStatus || 502
         ).json({
           ok: false,
           enabled: true,
-          stage: "gemini-request",
+          stage:
+            "gemini-request",
 
-          requestCount:
-            attemptedRequests,
+          requestCount,
 
           submittedCount:
             candidates.length,
@@ -247,80 +226,64 @@ export default async function handler(req, res) {
             allResults,
 
           error:
-            error?.message ||
-            "Gemini could not complete the analysis.",
+            error.message ||
+            "Gemini analysis failed.",
 
-          diagnostic: {
-            stage:
-              diagnostic.stage ||
-              "gemini-request",
-
-            reason:
-              diagnostic.reason ||
-              "UNKNOWN_GEMINI_ERROR",
-
-            httpStatus:
-              diagnostic.httpStatus ||
-              error?.httpStatus ||
-              null,
-
-            model,
-
-            batch:
-              batchIndex + 1,
-
-            totalBatches:
-              batches.length,
-
-            batchCandidates:
-              batch.length,
-
-            attemptedRequests,
-
-            completedResults:
-              allResults.length,
-
-            elapsedMs:
-              Date.now() - startedAt,
-
-            providerMessage:
-              diagnostic.providerMessage ||
-              null
-          }
+          diagnostic:
+            error.diagnostic || {
+              stage:
+                "gemini-request",
+              model,
+              batch:
+                i + 1,
+              totalBatches:
+                batches.length,
+              elapsedMs:
+                Date.now() -
+                startedAt
+            }
         });
       }
     }
 
 
-    /* =====================================================
-       SORT RESULTS IN ORIGINAL INPUT ORDER
-    ===================================================== */
+    /* =======================================================
+       ORDER RESULTS
+    ======================================================= */
 
-    const inputOrder =
+    const order =
       new Map();
 
-    candidates.forEach(
-      (candidate, index) => {
-        inputOrder.set(
-          normalizeDomain(
-            candidate?.domain
-          ),
-          index
+    for (
+      let i = 0;
+      i < candidates.length;
+      i++
+    ) {
+      const domain =
+        normalizeDomain(
+          candidates[i]?.domain
+        );
+
+      if (domain) {
+        order.set(
+          domain,
+          i
         );
       }
-    );
+    }
+
 
     allResults.sort(
       (a, b) => {
         const aIndex =
-          inputOrder.get(
+          order.get(
             normalizeDomain(
               a?.domain
             )
           );
 
         const bIndex =
-          inputOrder.get(
+          order.get(
             normalizeDomain(
               b?.domain
             )
@@ -334,17 +297,17 @@ export default async function handler(req, res) {
     );
 
 
-    /* =====================================================
+    /* =======================================================
        SUCCESS
-    ===================================================== */
+    ======================================================= */
 
     return res.status(200).json({
       ok: true,
       enabled: true,
-      stage: "gemini-complete",
+      stage:
+        "gemini-complete",
 
-      requestCount:
-        batches.length,
+      requestCount,
 
       submittedCount:
         candidates.length,
@@ -356,7 +319,6 @@ export default async function handler(req, res) {
         allResults,
 
       diagnostic: {
-        stage: "gemini-complete",
         model,
 
         totalBatches:
@@ -369,7 +331,8 @@ export default async function handler(req, res) {
           allResults.length,
 
         elapsedMs:
-          Date.now() - startedAt
+          Date.now() -
+          startedAt
       }
     });
 
@@ -382,7 +345,8 @@ export default async function handler(req, res) {
     return res.status(500).json({
       ok: false,
       enabled: true,
-      stage: "gemini-handler",
+      stage:
+        "gemini-handler",
 
       requestCount: 0,
       submittedCount: 0,
@@ -390,61 +354,82 @@ export default async function handler(req, res) {
       results: [],
 
       error:
-        error?.message ||
-        "Unexpected Gemini handler error.",
-
-      diagnostic: {
-        stage: "gemini-handler",
-        reason:
-          "UNEXPECTED_HANDLER_ERROR",
-        model,
-        elapsedMs:
-          Date.now() - startedAt
-      }
+        error.message ||
+        "Unexpected Gemini handler error."
     });
   }
 }
 
 
 /* =========================================================
-   CREATE BATCHES
+   BODY
+========================================================= */
+
+function parseBody(req) {
+  if (
+    req.body &&
+    typeof req.body === "object"
+  ) {
+    return req.body;
+  }
+
+  if (
+    typeof req.body === "string"
+  ) {
+    try {
+      return JSON.parse(
+        req.body
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+
+/* =========================================================
+   BATCHES
 ========================================================= */
 
 function createBatches(
   items,
-  batchSize
+  size
 ) {
-  const result = [];
+  const batches = [];
 
-  if (!Array.isArray(items)) {
-    return result;
+  if (
+    !Array.isArray(items)
+  ) {
+    return batches;
   }
 
-  const safeSize =
+  const batchSize =
     Math.max(
       1,
-      Number(batchSize) || 1
+      Number(size) || 1
     );
 
   for (
     let i = 0;
     i < items.length;
-    i += safeSize
+    i += batchSize
   ) {
-    result.push(
+    batches.push(
       items.slice(
         i,
-        i + safeSize
+        i + batchSize
       )
     );
   }
 
-  return result;
+  return batches;
 }
 
 
 /* =========================================================
-   ANALYZE ONE BATCH
+   ANALYZE BATCH
 ========================================================= */
 
 async function analyzeBatch({
@@ -452,15 +437,10 @@ async function analyzeBatch({
   apiKey,
   model
 }) {
-  if (
-    !Array.isArray(candidates) ||
-    candidates.length === 0
-  ) {
-    return [];
-  }
-
   const prompt =
-    buildPrompt(candidates);
+    buildPrompt(
+      candidates
+    );
 
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -472,50 +452,47 @@ async function analyzeBatch({
   let lastError = null;
 
   for (
-    let attempt = 1;
-    attempt <= MAX_RETRIES + 1;
+    let attempt = 0;
+    attempt <= MAX_RETRIES;
     attempt++
   ) {
     try {
-      return await performGeminiRequest({
+      return await requestGemini({
         endpoint,
         prompt
       });
 
     } catch (error) {
-      lastError = error;
+      lastError =
+        error;
 
       const status =
         Number(
-          error?.httpStatus
-        ) || 0;
+          error.httpStatus || 0
+        );
 
-      const reason =
-        error?.diagnostic?.reason ||
-        "";
+      /*
+       * Don't retry authentication,
+       * invalid request, missing model,
+       * or quota errors.
+       */
 
-      const nonRetryable =
+      const noRetry =
         status === 400 ||
         status === 401 ||
         status === 403 ||
         status === 404 ||
-        status === 429 ||
-        reason ===
-          "GEMINI_AUTH" ||
-        reason ===
-          "GEMINI_INVALID_REQUEST" ||
-        reason ===
-          "GEMINI_MODEL_NOT_FOUND";
+        status === 429;
 
       if (
-        nonRetryable ||
-        attempt >= MAX_RETRIES + 1
+        noRetry ||
+        attempt >= MAX_RETRIES
       ) {
         break;
       }
 
       await sleep(
-        1000 * attempt
+        1000
       );
     }
   }
@@ -530,10 +507,10 @@ async function analyzeBatch({
 
 
 /* =========================================================
-   GEMINI HTTP REQUEST
+   GEMINI REQUEST
 ========================================================= */
 
-async function performGeminiRequest({
+async function requestGemini({
   endpoint,
   prompt
 }) {
@@ -542,9 +519,8 @@ async function performGeminiRequest({
 
   const timer =
     setTimeout(
-      () => {
-        controller.abort();
-      },
+      () =>
+        controller.abort(),
       GEMINI_TIMEOUT_MS
     );
 
@@ -573,7 +549,8 @@ async function performGeminiRequest({
 
                   parts: [
                     {
-                      text: prompt
+                      text:
+                        prompt
                     }
                   ]
                 }
@@ -593,82 +570,74 @@ async function performGeminiRequest({
       );
 
   } catch (error) {
-    if (
-      error?.name ===
-      "AbortError"
-    ) {
-      const timeoutError =
-        new Error(
-          `Gemini request timed out after ${
-            GEMINI_TIMEOUT_MS / 1000
-          } seconds.`
-        );
-
-      timeoutError.httpStatus =
-        504;
-
-      timeoutError.diagnostic = {
-        stage:
-          "gemini-network",
-
-        reason:
-          "GEMINI_TIMEOUT"
-      };
-
-      throw timeoutError;
-    }
-
     const networkError =
       new Error(
-        `Gemini network connection failed: ${
-          error?.message ||
-          "Unknown network error"
-        }`
+        error?.name ===
+        "AbortError"
+          ? "Gemini request timed out."
+          : `Gemini network error: ${
+              error?.message ||
+              "Unknown error"
+            }`
       );
 
     networkError.httpStatus =
-      502;
+      error?.name ===
+      "AbortError"
+        ? 504
+        : 502;
 
     networkError.diagnostic = {
       stage:
         "gemini-network",
 
       reason:
-        "GEMINI_NETWORK_ERROR"
+        error?.name ===
+        "AbortError"
+          ? "GEMINI_TIMEOUT"
+          : "GEMINI_NETWORK_ERROR"
     };
 
     throw networkError;
 
   } finally {
-    clearTimeout(timer);
+    clearTimeout(
+      timer
+    );
   }
 
 
-  /* =====================================================
-     HTTP ERROR
-  ===================================================== */
+  /* =======================================================
+     PROVIDER ERROR
+  ======================================================= */
 
-  if (!response.ok) {
-    let providerBody = "";
+  if (
+    !response.ok
+  ) {
+    let providerText =
+      "";
 
     try {
-      providerBody =
+      providerText =
         await response.text();
     } catch {
-      providerBody = "";
+      providerText =
+        "";
     }
 
-    providerBody =
-      String(
-        providerBody || ""
-      ).slice(0, 2500);
+    providerText =
+      providerText.slice(
+        0,
+        2500
+      );
 
-    let providerMessage = "";
+    let providerMessage =
+      "";
 
     try {
       const parsed =
         JSON.parse(
-          providerBody
+          providerText
         );
 
       providerMessage =
@@ -678,8 +647,9 @@ async function performGeminiRequest({
 
     } catch {
       providerMessage =
-        providerBody;
+        providerText;
     }
+
 
     const status =
       response.status;
@@ -687,68 +657,40 @@ async function performGeminiRequest({
     let reason =
       "GEMINI_REQUEST_ERROR";
 
-    let friendly =
-      `Gemini API returned HTTP ${status}.`;
-
-
-    if (status === 400) {
+    if (
+      status === 400
+    ) {
       reason =
         "GEMINI_INVALID_REQUEST";
-
-      friendly =
-        "Gemini rejected the request (HTTP 400).";
-    }
-
-
-    if (
+    } else if (
       status === 401 ||
       status === 403
     ) {
       reason =
         "GEMINI_AUTH";
-
-      friendly =
-        `Gemini authentication/permission failed (HTTP ${status}). Check GEMINI_API_KEY.`;
-    }
-
-
-    if (status === 404) {
+    } else if (
+      status === 404
+    ) {
       reason =
         "GEMINI_MODEL_NOT_FOUND";
-
-      friendly =
-        `Gemini model/endpoint was not found (HTTP 404). Current model: ${modelSafeFromEndpoint(
-          endpoint
-        )}`;
-    }
-
-
-    if (status === 429) {
+    } else if (
+      status === 429
+    ) {
       reason =
         "GEMINI_QUOTA";
-
-      friendly =
-        "Gemini quota/rate limit was reached (HTTP 429).";
-    }
-
-
-    if (status >= 500) {
+    } else if (
+      status >= 500
+    ) {
       reason =
         "GEMINI_SERVICE";
-
-      friendly =
-        `Gemini service returned HTTP ${status}.`;
     }
 
-
-    const finalMessage =
-      providerMessage
-        ? `${friendly} Provider: ${providerMessage}`
-        : friendly;
 
     const error =
       new Error(
-        finalMessage
+        providerMessage
+          ? `Gemini HTTP ${status}: ${providerMessage}`
+          : `Gemini HTTP ${status}.`
       );
 
     error.httpStatus =
@@ -771,9 +713,9 @@ async function performGeminiRequest({
   }
 
 
-  /* =====================================================
-     READ GEMINI RESPONSE
-  ===================================================== */
+  /* =======================================================
+     RESPONSE JSON
+  ======================================================= */
 
   let data;
 
@@ -784,7 +726,7 @@ async function performGeminiRequest({
   } catch {
     const error =
       new Error(
-        "Gemini returned a response that was not valid JSON."
+        "Gemini returned invalid JSON."
       );
 
     error.httpStatus =
@@ -803,12 +745,14 @@ async function performGeminiRequest({
 
 
   const text =
-    extractGeminiText(data);
+    extractGeminiText(
+      data
+    );
 
   if (!text) {
     const error =
       new Error(
-        "Gemini returned an empty analysis response."
+        "Gemini returned an empty response."
       );
 
     error.httpStatus =
@@ -830,14 +774,15 @@ async function performGeminiRequest({
 
   try {
     parsed =
-      parseJsonResponse(text);
+      parseGeminiJson(
+        text
+      );
 
   } catch (error) {
     const parseError =
       new Error(
-        `Gemini returned invalid analysis JSON: ${
-          error?.message ||
-          "JSON parse failed"
+        `Gemini analysis JSON could not be parsed: ${
+          error.message
         }`
       );
 
@@ -865,136 +810,112 @@ async function performGeminiRequest({
         ? parsed.results
         : [];
 
-  const normalized =
-    normalizeResults(
-      rawResults
-    );
 
-  return normalized;
+  return normalizeResults(
+    rawResults
+  );
 }
 
 
 /* =========================================================
-   BUILD PROMPT
+   PROMPT
 ========================================================= */
 
 function buildPrompt(
   candidates
 ) {
-  const safeCandidates =
-    Array.isArray(candidates)
-      ? candidates
-      : [];
+  const compact =
+    candidates.map(
+      candidate => ({
+        domain:
+          normalizeDomain(
+            candidate?.domain
+          ),
 
-  const compactCandidates =
-    safeCandidates.map(
-      (candidate) => {
-        const evidence =
+        websiteName:
+          candidate?.websiteName ||
+          candidate?.title ||
+          "",
+
+        registeredAt:
+          candidate?.registeredAt ||
+          null,
+
+        discoveredAt:
+          candidate?.discoveredAt ||
+          null,
+
+        registrationVerified:
+          candidate?.registrationVerified ===
+          true,
+
+        evidence:
           compactEvidence(
             candidate
-          );
-
-        return {
-          domain:
-            normalizeDomain(
-              candidate?.domain
-            ),
-
-          websiteName:
-            candidate?.websiteName ||
-            candidate?.title ||
-            "",
-
-          url:
-            candidate?.url ||
-            "",
-
-          discoveredAt:
-            candidate?.discoveredAt ||
-            null,
-
-          registeredAt:
-            candidate?.registeredAt ||
-            null,
-
-          registrationVerified:
-            Boolean(
-              candidate?.registrationVerified
-            ),
-
-          investmentRelevant:
-            Boolean(
-              candidate?.investmentRelevant
-            ),
-
-          paymentMethods:
-            Array.isArray(
-              candidate?.paymentMethods
-            )
-              ? candidate.paymentMethods
-              : [],
-
-          evidence
-        };
-      }
+          )
+      })
     );
 
 
   return `
 You are the final evidence-based analyst for LD76 Investment Radar.
 
-Your task is to analyze recently discovered websites that may be related to investment, earning, profit, deposit, withdrawal, referral, HYIP, financial promotion, or similar online money-making activity.
+Analyze each supplied website using ONLY the evidence provided.
 
-IMPORTANT:
+This is research and risk assessment, not an accusation.
 
-1. Do NOT assume a website is a scam merely because it is an investment or earning website.
-2. Do NOT treat uncertainty or missing information as proof of fraud.
-3. Evaluate the supplied evidence only.
-4. Separate verified facts, suspicious indicators, positive signals, and missing information.
-5. A Telegram, WhatsApp, referral program, crypto payment, or Pakistani payment method alone does NOT prove scam.
-6. Give a numerical GEMINI SCAM SCORE from 0 to 100.
-7. 0 means very few scam indicators in the supplied evidence.
-8. 100 means extremely strong scam indicators in the supplied evidence.
-9. Return exactly one result for every supplied candidate whenever possible.
-10. Do not invent company registrations, licenses, owners, addresses, payment methods, returns, or other facts.
-11. If information is unavailable, explicitly say it is unavailable or unverified.
-12. Numerical return/profit claims should be highlighted when present.
-13. Pay particular attention to guaranteed/fixed returns, unrealistic daily/monthly returns, deposit requirements, withdrawal conditions, referral/MLM structures, missing legal identity, unverifiable company claims, fake-looking legal pages, and contradictory information.
-14. Payment methods should be reported when actually detected in the supplied evidence.
-15. Keep the response compact but useful.
+IMPORTANT RULES:
 
-For EACH candidate return this exact structure:
+1. Do NOT automatically classify an investment or earning website as a scam.
+2. Do NOT automatically classify a website as a scam because it accepts crypto.
+3. Do NOT automatically classify a website as a scam because it accepts Bank, Easypaisa, JazzCash, or another payment method.
+4. Do NOT treat Telegram, WhatsApp, referral programs, or social media as automatic proof of fraud.
+5. Do NOT invent facts.
+6. Do NOT invent company registration, license, regulator, owners, addresses, payment details, returns, or legal status.
+7. Missing evidence is NOT proof of fraud. Put missing information in missingInformation.
+8. Evaluate guaranteed returns, fixed returns, unrealistic ROI, daily profit claims, deposit requirements, withdrawal restrictions, referral structures, company identity, legal information, and contradictory evidence carefully.
+9. Separate suspicious indicators from positive signals.
+10. Scam score must represent the strength of scam indicators found in the supplied evidence.
+11. 0 means almost no scam indicators found.
+12. 100 means extremely strong scam indicators found.
+13. Confidence is how confident you are in the assessment based on the amount and quality of evidence.
+14. Return one object for every supplied candidate.
+15. Return ONLY valid JSON.
+
+CLASSIFICATION:
+
+0-20   = Very Low Scam Indicators
+21-40  = Low
+41-60  = Moderate / Uncertain
+61-80  = Suspicious
+81-100 = Highly Suspicious
+
+OUTPUT FORMAT:
 
 {
-  "domain": "example.com",
-  "websiteName": "Example",
-  "scamScore": 0,
-  "classification": "Very Low Scam Indicators",
-  "confidence": 0,
-  "summary": "Short evidence-based assessment.",
-  "redFlags": [],
-  "positiveSignals": [],
-  "missingInformation": [],
-  "investmentClaims": [],
-  "paymentMethods": []
+  "results": [
+    {
+      "domain": "example.com",
+      "websiteName": "Example",
+      "scamScore": 0,
+      "classification": "Very Low Scam Indicators",
+      "confidence": 0,
+      "summary": "Evidence-based assessment.",
+      "redFlags": [],
+      "positiveSignals": [],
+      "missingInformation": [],
+      "investmentClaims": [],
+      "paymentMethods": []
+    }
+  ]
 }
 
-Classification bands:
-
-0-20   = "Very Low Scam Indicators"
-21-40  = "Low"
-41-60  = "Moderate / Uncertain"
-61-80  = "Suspicious"
-81-100 = "Highly Suspicious"
-
-"confidence" must also be a number from 0 to 100.
-
-Return ONLY valid JSON.
+Every array must contain strings only.
 
 Candidates:
 
 ${JSON.stringify(
-  compactCandidates,
+  compact,
   null,
   2
 )}
@@ -1003,7 +924,7 @@ ${JSON.stringify(
 
 
 /* =========================================================
-   COMPACT EVIDENCE
+   EVIDENCE
 ========================================================= */
 
 function compactEvidence(
@@ -1019,56 +940,20 @@ function compactEvidence(
 
   addEvidence(
     parts,
-    "Meta description",
-    candidate?.metaDescription
-  );
-
-  addEvidence(
-    parts,
     "Website name",
     candidate?.websiteName
   );
 
   addEvidence(
     parts,
-    "Company",
-    candidate?.company
+    "Description",
+    candidate?.description
   );
 
   addEvidence(
     parts,
-    "Registration",
-    candidate?.registration
-  );
-
-  addEvidence(
-    parts,
-    "Legal",
-    candidate?.legal
-  );
-
-  addEvidence(
-    parts,
-    "About",
-    candidate?.about
-  );
-
-  addEvidence(
-    parts,
-    "Contact",
-    candidate?.contact
-  );
-
-  addEvidence(
-    parts,
-    "Support",
-    candidate?.support
-  );
-
-  addEvidence(
-    parts,
-    "Payment methods",
-    candidate?.paymentMethods
+    "Investment",
+    candidate?.investment
   );
 
   addEvidence(
@@ -1079,8 +964,56 @@ function compactEvidence(
 
   addEvidence(
     parts,
+    "Financial signals",
+    candidate?.financialSignals
+  );
+
+  addEvidence(
+    parts,
+    "Payment methods",
+    candidate?.paymentMethods
+  );
+
+  addEvidence(
+    parts,
+    "Company",
+    candidate?.company
+  );
+
+  addEvidence(
+    parts,
+    "Legal",
+    candidate?.legal
+  );
+
+  addEvidence(
+    parts,
+    "Contact",
+    candidate?.contact
+  );
+
+  addEvidence(
+    parts,
     "Referral",
     candidate?.referral
+  );
+
+  addEvidence(
+    parts,
+    "Withdrawal",
+    candidate?.withdrawal
+  );
+
+  addEvidence(
+    parts,
+    "Deposit",
+    candidate?.deposit
+  );
+
+  addEvidence(
+    parts,
+    "Website text",
+    candidate?.content
   );
 
   addEvidence(
@@ -1091,25 +1024,21 @@ function compactEvidence(
 
   addEvidence(
     parts,
-    "Relevant snippets",
-    candidate?.relevantSnippets
+    "Snippets",
+    candidate?.snippets
   );
 
   addEvidence(
     parts,
-    "Links",
-    candidate?.links
-  );
-
-  addEvidence(
-    parts,
-    "Other evidence",
+    "Evidence",
     candidate?.evidence
   );
 
 
   let result =
-    parts.join("\n\n");
+    parts.join(
+      "\n\n"
+    );
 
   if (
     result.length >
@@ -1145,11 +1074,15 @@ function addEvidence(
     typeof value ===
     "string"
   ) {
-    text = value.trim();
+    text =
+      value.trim();
+
   } else {
     try {
       text =
-        JSON.stringify(value);
+        JSON.stringify(
+          value
+        );
     } catch {
       text =
         String(value);
@@ -1167,14 +1100,15 @@ function addEvidence(
 
 
 /* =========================================================
-   EXTRACT TEXT FROM GEMINI RESPONSE
+   GEMINI TEXT
 ========================================================= */
 
 function extractGeminiText(
   data
 ) {
   const parts =
-    data?.candidates?.[0]?.content?.parts;
+    data?.candidates?.[0]
+      ?.content?.parts;
 
   if (
     !Array.isArray(parts)
@@ -1184,7 +1118,7 @@ function extractGeminiText(
 
   return parts
     .map(
-      (part) =>
+      part =>
         typeof part?.text ===
         "string"
           ? part.text
@@ -1196,10 +1130,10 @@ function extractGeminiText(
 
 
 /* =========================================================
-   PARSE JSON
+   PARSE GEMINI JSON
 ========================================================= */
 
-function parseJsonResponse(
+function parseGeminiJson(
   text
 ) {
   let cleaned =
@@ -1208,14 +1142,13 @@ function parseJsonResponse(
 
   if (!cleaned) {
     throw new Error(
-      "Empty Gemini response."
+      "Empty response."
     );
   }
 
 
   /*
-   * Remove markdown code fences
-   * if Gemini unexpectedly adds them.
+   * Remove markdown fences.
    */
 
   cleaned =
@@ -1235,8 +1168,85 @@ function parseJsonResponse(
       .trim();
 
 
-  return JSON.parse(
-    cleaned
+  /*
+   * First attempt:
+   * direct JSON.
+   */
+
+  try {
+    return JSON.parse(
+      cleaned
+    );
+  } catch {
+    // Continue.
+  }
+
+
+  /*
+   * Sometimes Gemini may put
+   * text before/after JSON.
+   *
+   * Extract first JSON object.
+   */
+
+  const objectStart =
+    cleaned.indexOf(
+      "{"
+    );
+
+  const objectEnd =
+    cleaned.lastIndexOf(
+      "}"
+    );
+
+  if (
+    objectStart >= 0 &&
+    objectEnd > objectStart
+  ) {
+    const objectText =
+      cleaned.slice(
+        objectStart,
+        objectEnd + 1
+      );
+
+    return JSON.parse(
+      objectText
+    );
+  }
+
+
+  /*
+   * Or JSON array.
+   */
+
+  const arrayStart =
+    cleaned.indexOf(
+      "["
+    );
+
+  const arrayEnd =
+    cleaned.lastIndexOf(
+      "]"
+    );
+
+  if (
+    arrayStart >= 0 &&
+    arrayEnd > arrayStart
+  ) {
+    const arrayText =
+      cleaned.slice(
+        arrayStart,
+        arrayEnd + 1
+      );
+
+    return JSON.parse(
+      arrayText
+    );
+  }
+
+
+  throw new Error(
+    "No valid JSON object or array found."
   );
 }
 
@@ -1256,7 +1266,7 @@ function normalizeResults(
     return [];
   }
 
-  const results = [];
+  const output = [];
 
   for (
     const raw of rawResults
@@ -1278,34 +1288,29 @@ function normalizeResults(
       continue;
     }
 
-    const score =
-      normalizeScore(
+    const scamScore =
+      normalizeNumber(
         raw.scamScore
       );
 
     /*
-     * IMPORTANT:
-     * A result without a valid score
-     * is NOT treated as a successful
-     * Gemini analysis.
+     * Invalid score means this is NOT
+     * a successfully analyzed result.
      */
 
-    if (score === null) {
+    if (
+      scamScore === null
+    ) {
       continue;
     }
 
-    const classification =
-      normalizeClassification(
-        raw.classification,
-        score
-      );
-
     const confidence =
-      normalizeScore(
+      normalizeNumber(
         raw.confidence
       );
 
-    results.push({
+
+    output.push({
       domain,
 
       websiteName:
@@ -1313,14 +1318,17 @@ function normalizeResults(
           raw.websiteName
         ),
 
-      scamScore:
-        score,
+      scamScore,
 
-      classification,
+      classification:
+        normalizeClassification(
+          raw.classification,
+          scamScore
+        ),
 
       confidence:
         confidence === null
-          ? null
+          ? 0
           : confidence,
 
       summary:
@@ -1329,41 +1337,41 @@ function normalizeResults(
         ),
 
       redFlags:
-        normalizeStringArray(
+        normalizeArray(
           raw.redFlags
         ),
 
       positiveSignals:
-        normalizeStringArray(
+        normalizeArray(
           raw.positiveSignals
         ),
 
       missingInformation:
-        normalizeStringArray(
+        normalizeArray(
           raw.missingInformation
         ),
 
       investmentClaims:
-        normalizeStringArray(
+        normalizeArray(
           raw.investmentClaims
         ),
 
       paymentMethods:
-        normalizeStringArray(
+        normalizeArray(
           raw.paymentMethods
         )
     });
   }
 
-  return results;
+  return output;
 }
 
 
 /* =========================================================
-   SCORE
+   NUMBER
 ========================================================= */
 
-function normalizeScore(
+function normalizeNumber(
   value
 ) {
   const number =
@@ -1393,11 +1401,13 @@ function normalizeClassification(
   value,
   score
 ) {
-  const text =
-    cleanString(value);
+  const supplied =
+    cleanString(
+      value
+    );
 
-  if (text) {
-    return text;
+  if (supplied) {
+    return supplied;
   }
 
   if (score <= 20) {
@@ -1421,7 +1431,29 @@ function normalizeClassification(
 
 
 /* =========================================================
-   STRING HELPERS
+   ARRAY
+========================================================= */
+
+function normalizeArray(
+  value
+) {
+  if (
+    !Array.isArray(value)
+  ) {
+    return [];
+  }
+
+  return value
+    .map(
+      item =>
+        cleanString(item)
+    )
+    .filter(Boolean);
+}
+
+
+/* =========================================================
+   STRING
 ========================================================= */
 
 function cleanString(
@@ -1440,34 +1472,17 @@ function cleanString(
 }
 
 
-function normalizeStringArray(
-  value
-) {
-  if (
-    !Array.isArray(value)
-  ) {
-    return [];
-  }
-
-  return value
-    .map(
-      (item) =>
-        cleanString(item)
-    )
-    .filter(Boolean);
-}
-
-
 /* =========================================================
-   DOMAIN NORMALIZATION
+   DOMAIN
 ========================================================= */
 
 function normalizeDomain(
   value
 ) {
   let domain =
-    cleanString(value)
-      .toLowerCase();
+    cleanString(
+      value
+    ).toLowerCase();
 
   if (!domain) {
     return "";
@@ -1480,13 +1495,19 @@ function normalizeDomain(
     );
 
   domain =
-    domain.split("/")[0];
-
-  domain =
     domain.replace(
       /^www\./,
       ""
     );
+
+  domain =
+    domain.split("/")[0];
+
+  domain =
+    domain.split("?")[0];
+
+  domain =
+    domain.split("#")[0];
 
   domain =
     domain.replace(
@@ -1499,35 +1520,6 @@ function normalizeDomain(
 
 
 /* =========================================================
-   MODEL DISPLAY HELPER
-========================================================= */
-
-function modelSafeFromEndpoint(
-  endpoint
-) {
-  try {
-    const match =
-      String(endpoint)
-        .match(
-          /\/models\/([^:?#]+)/i
-        );
-
-    if (
-      match?.[1]
-    ) {
-      return decodeURIComponent(
-        match[1]
-      );
-    }
-  } catch {
-    // Ignore parsing failure.
-  }
-
-  return "configured Gemini model";
-}
-
-
-/* =========================================================
    SLEEP
 ========================================================= */
 
@@ -1535,10 +1527,10 @@ function sleep(
   milliseconds
 ) {
   return new Promise(
-    (resolve) =>
+    resolve =>
       setTimeout(
         resolve,
         milliseconds
       )
   );
-         }
+       }
