@@ -20,7 +20,7 @@ def _fetch(url):
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "LD76-Investment-Radar/2.0",
+            "User-Agent": "LD76-Investment-Radar/3.0",
             "Accept": "text/plain,*/*",
         },
     )
@@ -86,27 +86,14 @@ def _domains(period, tld):
 
 def _scan_one(domain):
     try:
-        result = detect_investment(
+        return detect_investment(
             domain
         )
 
-        if result:
-            return {
-                "domain": domain,
-                "status": "matched",
-                "result": result,
-            }
-
-        return {
-            "domain": domain,
-            "status": "rejected",
-            "result": None,
-        }
-
     except Exception as exc:
         return {
-            "domain": domain,
             "status": "error",
+            "domain": domain,
             "result": None,
             "error": str(exc),
         }
@@ -136,15 +123,18 @@ def scan_domains(
                 ),
                 "total": 0,
                 "checked": 0,
-                "found": 0,
+                "fetched": 0,
                 "fetch_failed": 0,
                 "rejected": 0,
                 "errors": 0,
+                "found": 0,
                 "results": [],
             }
 
         results = []
+
         checked = 0
+        fetched = 0
         fetch_failed = 0
         rejected = 0
         errors = 0
@@ -179,6 +169,8 @@ def scan_domains(
                     )
 
                     if status == "matched":
+                        fetched += 1
+
                         result = item.get(
                             "result"
                         )
@@ -189,7 +181,11 @@ def scan_domains(
                             )
 
                     elif status == "rejected":
+                        fetched += 1
                         rejected += 1
+
+                    elif status == "fetch_failed":
+                        fetch_failed += 1
 
                     else:
                         errors += 1
@@ -205,16 +201,36 @@ def scan_domains(
             reverse=True,
         )
 
+        if results:
+            message = (
+                "Scan completed. "
+                "Investment domains found."
+            )
+        elif fetch_failed == total:
+            message = (
+                "All domains failed "
+                "website fetching."
+            )
+        elif fetched > 0:
+            message = (
+                "Websites were fetched, "
+                "but no investment matches "
+                "passed the detection threshold."
+            )
+        else:
+            message = "Scan completed."
+
         return {
             "scan_id": scan_id,
             "status": "completed",
-            "message": "Scan completed.",
+            "message": message,
             "total": total,
             "checked": checked,
-            "found": len(results),
+            "fetched": fetched,
             "fetch_failed": fetch_failed,
             "rejected": rejected,
             "errors": errors,
+            "found": len(results),
             "results": results,
         }
 
@@ -226,9 +242,10 @@ def scan_domains(
             "error": str(exc),
             "total": 0,
             "checked": 0,
-            "found": 0,
+            "fetched": 0,
             "fetch_failed": 0,
             "rejected": 0,
             "errors": 1,
+            "found": 0,
             "results": [],
         }
