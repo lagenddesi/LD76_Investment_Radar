@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
@@ -9,7 +10,7 @@
 
   <meta
     name="description"
-    content="LD76 Investment Radar - Research newly discovered investment websites and analyze scam indicators."
+    content="LD76 Investment Radar - Research newly registered investment websites and analyze scam indicators."
   >
 
   <meta name="theme-color" content="#0b1220">
@@ -22,9 +23,14 @@
 
 <body>
   <div id="app">
+
+    <!-- HEADER -->
     <header class="app-header">
       <div class="brand">
-        <div class="brand-title">LD76 INVESTMENT RADAR</div>
+        <div class="brand-title">
+          LD76 INVESTMENT RADAR
+        </div>
+
         <div class="brand-subtitle">
           Recently Registered Sites
         </div>
@@ -40,12 +46,18 @@
       </button>
     </header>
 
+
+    <!-- MAIN CONTENT -->
     <main class="main-content">
 
+      <!-- SCAN PANEL -->
       <section class="scan-panel">
 
+        <!-- TLD -->
         <div class="form-group">
-          <label for="tldSelect">TLD</label>
+          <label for="tldSelect">
+            TLD
+          </label>
 
           <select id="tldSelect">
             <option value=".top">.top</option>
@@ -59,30 +71,71 @@
           </select>
         </div>
 
-        <div class="form-group">
-          <label>Search Period</label>
 
-          <div class="segmented-control">
+        <!-- SEARCH PERIOD -->
+        <div class="form-group">
+          <label>
+            Search Period
+          </label>
+
+          <div class="segmented-control period-selector">
+
             <button
               type="button"
               class="period-button active"
-              data-period="24h"
+              data-period="1d"
             >
-              24H
+              1 Day
             </button>
 
             <button
               type="button"
               class="period-button"
-              data-period="48h"
+              data-period="3d"
             >
-              48H
+              3 Days
             </button>
+
+            <button
+              type="button"
+              class="period-button"
+              data-period="7d"
+            >
+              7 Days
+            </button>
+
+            <button
+              type="button"
+              class="period-button"
+              data-period="15d"
+            >
+              15 Days
+            </button>
+
+            <button
+              type="button"
+              class="period-button"
+              data-period="1m"
+            >
+              1 Month
+            </button>
+
+          </div>
+
+          <div
+            id="activePeriodLabel"
+            class="active-period-label"
+          >
+            ACTIVE PERIOD: 1 DAY
           </div>
         </div>
 
+
+        <!-- PAYMENT METHODS -->
         <div class="form-group">
-          <label>Payment Methods</label>
+          <label>
+            Payment Methods
+          </label>
 
           <div class="checkbox-list">
 
@@ -128,6 +181,8 @@
           </div>
         </div>
 
+
+        <!-- FIND BUTTON -->
         <button
           id="findSitesButton"
           class="primary-button"
@@ -138,16 +193,22 @@
 
       </section>
 
+
+      <!-- PROGRESS -->
       <section
         id="progressSection"
         class="progress-section hidden"
         aria-live="polite"
       >
+
         <div class="section-title">
           Scan Progress
         </div>
 
-        <div id="progressStatus" class="progress-status">
+        <div
+          id="progressStatus"
+          class="progress-status"
+        >
           Waiting...
         </div>
 
@@ -155,6 +216,7 @@
           <div
             id="progressBarFill"
             class="progress-bar-fill"
+            style="width: 0%;"
           ></div>
         </div>
 
@@ -162,14 +224,21 @@
           id="progressDetails"
           class="progress-details"
         ></div>
+
       </section>
 
+
+      <!-- RESULTS -->
       <section
         id="resultsSection"
         class="results-section"
       >
+
         <div class="section-header">
-          <h2>Results</h2>
+
+          <h2>
+            Results
+          </h2>
 
           <button
             id="refreshResultsButton"
@@ -178,58 +247,95 @@
           >
             Refresh
           </button>
+
         </div>
 
         <div
           id="resultsContainer"
           class="results-container"
         >
+
           <div class="empty-state">
-            <div class="empty-icon">🔎</div>
-            <h3>No scan results yet</h3>
+
+            <div class="empty-icon">
+              🔎
+            </div>
+
+            <h3>
+              No scan results yet
+            </h3>
+
             <p>
               Select your filters and tap
               <strong>FIND NEW SITES</strong>.
             </p>
+
           </div>
+
         </div>
+
       </section>
 
     </main>
 
-    <nav class="bottom-nav" aria-label="Main navigation">
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav
+      class="bottom-nav"
+      aria-label="Main navigation"
+    >
 
       <button
         type="button"
         class="nav-button active"
         data-view="home"
       >
-        <span class="nav-icon">🔎</span>
-        <span>Scan</span>
+        <span class="nav-icon">
+          🔎
+        </span>
+
+        <span>
+          Scan
+        </span>
       </button>
+
 
       <button
         type="button"
         class="nav-button"
         data-view="history"
       >
-        <span class="nav-icon">📋</span>
-        <span>History</span>
+        <span class="nav-icon">
+          📋
+        </span>
+
+        <span>
+          History
+        </span>
       </button>
+
 
       <button
         type="button"
         class="nav-button"
         data-view="settings"
       >
-        <span class="nav-icon">⚙️</span>
-        <span>Settings</span>
+        <span class="nav-icon">
+          ⚙️
+        </span>
+
+        <span>
+          Settings
+        </span>
       </button>
 
     </nav>
 
   </div>
 
+
+  <!-- APP JAVASCRIPT -->
   <script src="/app.js" defer></script>
+
 </body>
 </html>
