@@ -86,9 +86,21 @@ def _domains(period, tld):
 
 def _scan_one(domain):
     try:
-        return detect_investment(
+        result = detect_investment(
             domain
         )
+
+        # Always preserve the original domain.
+        # detector.py may keep domain at the
+        # outer level while its detailed result
+        # lives inside "result".
+        if isinstance(result, dict):
+            result.setdefault(
+                "domain",
+                domain,
+            )
+
+        return result
 
     except Exception as exc:
         return {
@@ -97,6 +109,111 @@ def _scan_one(domain):
             "result": None,
             "error": str(exc),
         }
+
+
+def _normalise_match(item):
+    """
+    Convert detector output into the single
+    flat result format expected by the frontend.
+
+    Input:
+        {
+            "status": "matched",
+            "domain": "example.com",
+            "result": {
+                "score": 51,
+                "category": "Trading",
+                ...
+            }
+        }
+
+    Output:
+        {
+            "domain": "example.com",
+            "score": 51,
+            "category": "Trading",
+            ...
+        }
+    """
+
+    if not isinstance(item, dict):
+        return None
+
+    domain = (
+        item.get("domain")
+        or ""
+    ).strip().lower()
+
+    result = item.get(
+        "result"
+    )
+
+    if not isinstance(result, dict):
+        result = {}
+
+    # Start with the detailed detector result.
+    output = dict(result)
+
+    # Domain MUST always come from the scanner's
+    # original domain when available.
+    output["domain"] = (
+        domain
+        or output.get("domain")
+        or ""
+    )
+
+    # Preserve useful fields even if detector
+    # puts them outside the nested result.
+    for key in (
+        "score",
+        "category",
+        "matched_categories",
+        "evidence",
+        "negative_signals",
+        "url",
+        "title",
+    ):
+        if (
+            key not in output
+            and key in item
+        ):
+            output[key] = item[key]
+
+    # Make sure these fields always exist.
+    output.setdefault(
+        "score",
+        0,
+    )
+
+    output.setdefault(
+        "category",
+        "Investment",
+    )
+
+    output.setdefault(
+        "matched_categories",
+        [],
+    )
+
+    output.setdefault(
+        "evidence",
+        [],
+    )
+
+    output.setdefault(
+        "negative_signals",
+        [],
+    )
+
+    # If detector didn't provide URL,
+    # generate a usable HTTPS URL.
+    if not output.get("url") and output["domain"]:
+        output["url"] = (
+            "https://"
+            + output["domain"]
+        )
+
+    return output
 
 
 def scan_domains(
@@ -164,6 +281,13 @@ def scan_domains(
                 try:
                     item = future.result()
 
+                    if not isinstance(
+                        item,
+                        dict,
+                    ):
+                        errors += 1
+                        continue
+
                     status = item.get(
                         "status"
                     )
@@ -171,8 +295,8 @@ def scan_domains(
                     if status == "matched":
                         fetched += 1
 
-                        result = item.get(
-                            "result"
+                        result = _normalise_match(
+                            item
                         )
 
                         if result:
@@ -194,9 +318,11 @@ def scan_domains(
                     errors += 1
 
         results.sort(
-            key=lambda item: item.get(
-                "score",
-                0,
+            key=lambda item: float(
+                item.get(
+                    "score",
+                    0,
+                ) or 0
             ),
             reverse=True,
         )
@@ -206,19 +332,24 @@ def scan_domains(
                 "Scan completed. "
                 "Investment domains found."
             )
+
         elif fetch_failed == total:
             message = (
                 "All domains failed "
                 "website fetching."
             )
+
         elif fetched > 0:
             message = (
                 "Websites were fetched, "
                 "but no investment matches "
                 "passed the detection threshold."
             )
+
         else:
-            message = "Scan completed."
+            message = (
+                "Scan completed."
+            )
 
         return {
             "scan_id": scan_id,
