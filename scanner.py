@@ -1,41 +1,194 @@
-import json,threading,uuid,urllib.request
-from datetime import datetime,timezone
+import threading
+import uuid
+import urllib.request
+
 from detector import detect_investment
 
-FEED="https://smet.cz/nrd/data/{}/{}.txt"
-SCANS={}
+
+FEEDS = {
+    1: "https://smet.cz/nrd/data/today.txt",
+    3: "https://smet.cz/nrd/data/7d.txt",
+    7: "https://smet.cz/nrd/data/7d.txt",
+}
+
+SCANS = {}
+
 
 def _fetch(url):
-    req=urllib.request.Request(url,headers={"User-Agent":"LD76-Investment-Radar/1.0"})
-    with urllib.request.urlopen(req,timeout=30) as r:return r.read().decode("utf-8","ignore")
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "LD76-Investment-Radar/1.0",
+            "Accept": "text/plain",
+        },
+    )
+
+    with urllib.request.urlopen(req, timeout=60) as response:
+        return response.read().decode("utf-8", "ignore")
+
 
 def _domains(period):
-    days={1:"today",3:"7d",7:"7d"}[period]
-    data=_fetch(FEED.format("nrd/data" if False else "nrd","today.txt" if days=="today" else "7d.txt"))
-    return [x.strip().lower() for x in data.splitlines() if "." in x and not x.startswith("#")]
+    period = int(period)
 
-def _run(scan_id,period,tld):
-    s=SCANS[scan_id]
+    if period not in FEEDS:
+        period = 1
+
+    data = _fetch(FEEDS[period])
+
+    domains = []
+
+    for line in data.splitlines():
+        domain = line.strip().lower()
+
+        if not domain:
+            continue
+
+        if domain.startswith("#"):
+            continue
+
+        if "." not in domain:
+            continue
+
+        domains.append(domain)
+
+    return list(dict.fromkeys(domains))
+
+
+def _run(scan_id, period, tld):
+    scan = SCANS[scan_id]
+
     try:
-        domains=_domains(period)
-        if tld!="all":domains=[d for d in domains if d.endswith("."+tld)]
-        s.update(total=len(domains),status="scanning")
-        for i,domain in enumerate(domains):
-            try:
-                result=detect_investment(domain)
-                if result:s["results"].append(result)
-            except Exception:pass
-            s["checked"]=i+1
-        s.update(progress=100,status="completed",done=True,found=len(s["results"]))
-    except Exception as e:
-        s.update(status="error",error=str(e),done=True)
+        scan.update(
+            status="downloading",
+            progress=0,
+            message="Downloading newly registered domains..."
+        )
 
-def scan_domains(period=1,tld="all"):
-    scan_id=uuid.uuid4().hex
-    SCANS[scan_id]={"scan_id":scan_id,"status":"starting","progress":0,
-                    "total":0,"checked":0,"found":0,"results":[],"done":False}
-    threading.Thread(target=_run,args=(scan_id,period,tld),daemon=True).start()
+        domains = _domains(period)
+
+        if tld != "all":
+            suffix = "." + tld.lstrip(".")
+
+            domains = [
+                domain
+                for domain in domains
+                if domain.endswith(suffix)
+            ]
+
+        total = len(domains)
+
+        scan.update(
+            total=total,
+            status="scanning",
+            progress=0,
+            checked=0,
+            found=0,
+            message="Scanning domains..."
+        )
+
+        if total == 0:
+            scan.update(
+                progress=100,
+                status="completed",
+                done=True,
+                checked=0,
+                found=0,
+                results=[],
+                message="No domains found for this selection."
+            )
+            return
+
+        for index, domain in enumerate(domains, start=1):
+
+            try:
+                result = detect_investment(domain)
+
+                if result:
+                    scan["results"].append(result)
+                    scan["found"] = len(scan["results"])
+
+            except Exception:
+                pass
+
+            progress = int((index / total) * 100)
+
+            scan.update(
+                checked=index,
+                progress=progress,
+                status="scanning",
+                message=f"Scanning {index}/{total}"
+            )
+
+        scan.update(
+            progress=100,
+            status="completed",
+            done=True,
+            checked=total,
+            found=len(scan["results"]),
+            message="Scan completed."
+        )
+
+    except Exception as exc:
+
+        scan.update(
+            status="error",
+            done=True,
+            progress=100,
+            message="Scanner failed.",
+            error=str(exc)
+        )
+
+
+def scan_domains(period=1, tld="all"):
+    try:
+        period = int(period)
+    except Exception:
+        period = 1
+
+    if period not in FEEDS:
+        period = 1
+
+    tld = str(tld or "all").strip().lower()
+
+    scan_id = uuid.uuid4().hex
+
+    SCANS[scan_id] = {
+        "scan_id": scan_id,
+        "status": "starting",
+        "message": "Starting scan...",
+        "progress": 0,
+        "total": 0,
+        "checked": 0,
+        "found": 0,
+        "results": [],
+        "done": False,
+    }
+
+    thread = threading.Thread(
+        target=_run,
+        args=(scan_id, period, tld),
+        daemon=True,
+    )
+
+    thread.start()
+
     return scan_id
 
+
 def get_scan(scan_id):
-    return SCANS.get(scan_id,{"status":"not_found","done":True,"results":[]})
+    scan = SCANS.get(scan_id)
+
+    if scan is None:
+        return {
+            "scan_id": scan_id,
+            "status": "not_found",
+            "message": "Scan not found.",
+            "progress": 0,
+            "total": 0,
+            "checked": 0,
+            "found": 0,
+            "results": [],
+            "done": True,
+        }
+
+    return scan
