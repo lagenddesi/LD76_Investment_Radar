@@ -34,6 +34,11 @@ button{
  cursor:pointer
 }
 
+a{
+ color:var(--accent);
+ text-decoration:none
+}
+
 .app{
  max-width:560px;
  min-height:100vh;
@@ -65,9 +70,18 @@ header{
  font-weight:800
 }
 
-.head{flex:1}
-.head b{display:block}
-.head small,.muted{color:var(--muted)}
+.head{
+ flex:1
+}
+
+.head b{
+ display:block
+}
+
+.head small,
+.muted{
+ color:var(--muted)
+}
 
 .icon{
  background:var(--card);
@@ -76,10 +90,17 @@ header{
  border-radius:12px
 }
 
-main{padding:16px}
+main{
+ padding:16px
+}
 
-.screen{display:none}
-.screen.active{display:block}
+.screen{
+ display:none
+}
+
+.screen.active{
+ display:block
+}
 
 h1{
  font-size:24px;
@@ -122,7 +143,9 @@ p{
  font-size:19px
 }
 
-.stat small{color:var(--muted)}
+.stat small{
+ color:var(--muted)
+}
 
 .row{
  display:flex;
@@ -130,7 +153,9 @@ p{
  align-items:center
 }
 
-.between{justify-content:space-between}
+.between{
+ justify-content:space-between
+}
 
 .chips{
  display:flex;
@@ -188,7 +213,12 @@ p{
  background:var(--card);
  border:1px solid var(--border);
  border-radius:14px;
- margin:10px 0
+ margin:10px 0;
+ cursor:pointer
+}
+
+.result:hover{
+ border-color:var(--accent)
 }
 
 .domain{
@@ -215,13 +245,110 @@ p{
  border-bottom:1px solid var(--border)
 }
 
-.item:last-child{border:0}
+.item:last-child{
+ border:0
+}
 
-.item b{display:block}
+.item b{
+ display:block
+}
 
 .item span{
  color:var(--muted);
  font-size:13px
+}
+
+.evidence{
+ margin-top:14px
+}
+
+.evidence-row{
+ display:flex;
+ gap:8px;
+ align-items:flex-start;
+ padding:9px 0;
+ border-bottom:1px solid var(--border)
+}
+
+.evidence-row:last-child{
+ border-bottom:0
+}
+
+.evidence-icon{
+ color:var(--accent);
+ font-weight:800
+}
+
+.evidence-text{
+ flex:1;
+ word-break:break-word
+}
+
+.detail-card{
+ background:var(--card);
+ border:1px solid var(--border);
+ border-radius:16px;
+ padding:16px;
+ margin:12px 0
+}
+
+.detail-title{
+ font-size:22px;
+ font-weight:800;
+ word-break:break-all;
+ margin-bottom:10px
+}
+
+.detail-category{
+ display:inline-block;
+ padding:6px 10px;
+ border-radius:10px;
+ background:var(--accent);
+ color:#07100a;
+ font-weight:800;
+ font-size:13px
+}
+
+.detail-score{
+ font-size:30px;
+ font-weight:900;
+ color:var(--accent);
+ margin-top:14px
+}
+
+.confidence{
+ margin-top:3px;
+ color:var(--muted)
+}
+
+.open-button{
+ display:block;
+ text-align:center;
+ padding:13px;
+ border-radius:12px;
+ background:var(--accent);
+ color:#07100a;
+ font-weight:800;
+ margin-top:14px
+}
+
+.rdap-button{
+ width:100%;
+ padding:13px;
+ border-radius:12px;
+ background:var(--card2);
+ margin-top:8px
+}
+
+.rdap-box{
+ margin-top:14px;
+ background:var(--card2);
+ border-radius:12px;
+ padding:12px;
+ overflow:auto;
+ font-size:12px;
+ white-space:pre-wrap;
+ word-break:break-word
 }
 
 nav{
@@ -266,7 +393,9 @@ nav button.on{
  transition:.2s
 }
 
-.toggle.on{background:var(--accent)}
+.toggle.on{
+ background:var(--accent)
+}
 
 .toggle.on i{
  background:#07100a;
@@ -342,20 +471,20 @@ Discover newly appearing domains and detect real investment platforms.
 <div class="chips">
 
 <button class="chip on"
- data-period="1"
- onclick="period(1)">
+data-period="1"
+onclick="period(1)">
 1 Day
 </button>
 
 <button class="chip"
- data-period="3"
- onclick="period(3)">
+data-period="3"
+onclick="period(3)">
 3 Days
 </button>
 
 <button class="chip"
- data-period="7"
- onclick="period(7)">
+data-period="7"
+onclick="period(7)">
 7 Days
 </button>
 
@@ -369,32 +498,32 @@ Discover newly appearing domains and detect real investment platforms.
 <div class="chips">
 
 <button class="chip on"
- data-tld="all"
- onclick="tld('all')">
+data-tld="all"
+onclick="tld('all')">
 All
 </button>
 
 <button class="chip"
- data-tld="com"
- onclick="tld('com')">
+data-tld="com"
+onclick="tld('com')">
 .com
 </button>
 
 <button class="chip"
- data-tld="net"
- onclick="tld('net')">
+data-tld="net"
+onclick="tld('net')">
 .net
 </button>
 
 <button class="chip"
- data-tld="org"
- onclick="tld('org')">
+data-tld="org"
+onclick="tld('org')">
 .org
 </button>
 
 <button class="chip"
- data-tld="info"
- onclick="tld('info')">
+data-tld="info"
+onclick="tld('info')">
 .info
 </button>
 
@@ -402,7 +531,7 @@ All
 </div>
 
 <button class="primary"
- onclick="startScan()">
+onclick="startScan()">
 START SCAN
 </button>
 
@@ -464,7 +593,7 @@ Preparing scanner...
 </div>
 
 <button class="secondary"
- onclick="show('results')">
+onclick="show('results')">
 View Results
 </button>
 
@@ -491,7 +620,7 @@ Start a scan to see results.
 <section id="details" class="screen">
 
 <button class="back"
- onclick="show('results')">
+onclick="show('results')">
 ← Results
 </button>
 
@@ -514,8 +643,8 @@ Start a scan to see results.
 </div>
 
 <button class="toggle on"
- id="themeToggle"
- onclick="theme()">
+id="themeToggle"
+onclick="theme()">
 <i></i>
 </button>
 
@@ -554,7 +683,7 @@ Maximum 500 domains per scan
 <div class="item">
 <b>False Positives</b>
 <span>
-Domain parking, marketplaces, articles and generic pages are filtered.
+Domain parking and generic pages are filtered.
 </span>
 </div>
 
@@ -568,26 +697,26 @@ Domain parking, marketplaces, articles and generic pages are filtered.
 <nav>
 
 <button class="on"
- data-screen="home"
- onclick="show('home')">
+data-screen="home"
+onclick="show('home')">
 ⌂<br>Home
 </button>
 
 <button
- data-screen="scan"
- onclick="show('scan')">
+data-screen="scan"
+onclick="show('scan')">
 ⌕<br>Scan
 </button>
 
 <button
- data-screen="results"
- onclick="show('results')">
+data-screen="results"
+onclick="show('results')">
 ▣<br>Results
 </button>
 
 <button
- data-screen="settings"
- onclick="show('settings')">
+data-screen="settings"
+onclick="show('settings')">
 ⚙<br>Settings
 </button>
 
@@ -709,9 +838,22 @@ async function startScan(){
   );
 
   if(!response.ok){
-   throw new Error(
-    "HTTP " + response.status
-   );
+
+   let message =
+    "HTTP " + response.status;
+
+   try{
+    const errorData =
+     await response.json();
+
+    if(errorData.detail){
+     message =
+      String(errorData.detail);
+    }
+   }
+   catch(_){}
+
+   throw new Error(message);
   }
 
   setProgress(
@@ -731,8 +873,8 @@ async function startScan(){
 
   setProgress(
    100,
-   data.checked || 0,
-   data.found || 0,
+   Number(data.checked || 0),
+   Number(data.found || 0),
    data.message ||
     "Scan completed."
   );
@@ -761,7 +903,7 @@ async function startScan(){
    "resultsList"
   ).innerHTML =
    '<div class="error">' +
-   'Scanner could not complete the request.' +
+   esc(error.message || "Scanner failed.") +
    '</div>';
  }
 }
@@ -816,6 +958,178 @@ function setProgress(
 }
 
 
+function getResultObject(item){
+
+ if(!item){
+  return {};
+ }
+
+ if(
+  item.result &&
+  typeof item.result === "object"
+ ){
+  return item.result;
+ }
+
+ return item;
+}
+
+
+function getDomain(item){
+
+ return (
+  item.domain ||
+  item.result?.domain ||
+  "Unknown domain"
+ );
+}
+
+
+function getScore(item){
+
+ const result =
+  getResultObject(item);
+
+ const value =
+  Number(
+   result.score ??
+   item.score ??
+   0
+  );
+
+ return Number.isFinite(value)
+  ? value
+  : 0;
+}
+
+
+function getCategory(item){
+
+ const result =
+  getResultObject(item);
+
+ const category =
+  result.category ||
+  item.category ||
+  "";
+
+ if(
+  category &&
+  category !== "Unknown"
+ ){
+  return category;
+ }
+
+ const categories =
+  result.matched_categories ||
+  item.matched_categories ||
+  [];
+
+ if(Array.isArray(categories) &&
+    categories.length){
+
+  return categories[0];
+ }
+
+ return "Investment";
+}
+
+
+function getConfidence(score){
+
+ if(score >= 60){
+  return "High";
+ }
+
+ if(score >= 35){
+  return "Medium";
+ }
+
+ if(score >= 20){
+  return "Low";
+ }
+
+ return "Weak";
+}
+
+
+function getEvidence(item){
+
+ const result =
+  getResultObject(item);
+
+ const evidence =
+  result.evidence ||
+  item.evidence ||
+  [];
+
+ if(!Array.isArray(evidence)){
+  return [];
+ }
+
+ return evidence
+  .map(item => {
+
+   if(typeof item === "string"){
+    return item;
+   }
+
+   if(
+    item &&
+    typeof item === "object"
+   ){
+
+    const signal =
+     item.signal ||
+     item.phrase ||
+     item.text ||
+     "";
+
+    const category =
+     item.category ||
+     "";
+
+    if(signal && category){
+     return category + ": " + signal;
+    }
+
+    return signal;
+   }
+
+   return "";
+  })
+  .filter(Boolean);
+}
+
+
+function getUrl(item){
+
+ const result =
+  getResultObject(item);
+
+ let url =
+  result.url ||
+  item.url ||
+  "";
+
+ if(!url){
+
+  const domain =
+   getDomain(item);
+
+  if(
+   domain &&
+   domain !== "Unknown domain"
+  ){
+   url =
+    "https://" + domain;
+  }
+ }
+
+ return url;
+}
+
+
 function renderResults(){
 
  const box =
@@ -842,41 +1156,63 @@ function renderResults(){
  box.innerHTML =
   state.results
    .map(
-    (item, index) =>
+    (item,index) => {
 
-     `<div class="result"
-      onclick="details(${index})">
+     const domain =
+      getDomain(item);
 
-      <div class="row between">
+     const score =
+      getScore(item);
 
-       <span class="domain">
-        ${esc(item.domain || "Unknown")}
-       </span>
+     const category =
+      getCategory(item);
 
-       <span class="score">
-        ${item.score ?? "-"}
-       </span>
+     const confidence =
+      getConfidence(score);
+
+     const evidence =
+      getEvidence(item);
+
+     return `
+      <div class="result"
+       onclick="details(${index})">
+
+       <div class="row between">
+
+        <span class="domain">
+         ${esc(domain)}
+        </span>
+
+        <span class="score">
+         ${score}
+        </span>
+
+       </div>
+
+       <div>
+        <span class="badge">
+         ${esc(category)}
+        </span>
+
+        <span class="badge">
+         ${esc(confidence)} Confidence
+        </span>
+       </div>
+
+       ${
+        evidence.length
+         ? `
+          <div class="muted"
+           style="margin-top:8px">
+           ${esc(evidence[0])}
+          </div>
+         `
+         : ""
+       }
 
       </div>
-
-      <p>
-       ${esc(item.site_name || "Unknown site")}
-      </p>
-
-      <span class="badge">
-       Score: ${item.score ?? "-"}
-      </span>
-
-      <span class="badge">
-       ${esc(item.category || "Investment")}
-      </span>
-
-      <span class="badge">
-       Confidence:
-       ${esc(item.confidence || "Unknown")}
-      </span>
-
-     </div>`
+     `;
+    }
    )
    .join("");
 }
@@ -891,152 +1227,191 @@ function details(index){
   return;
  }
 
+ const domain =
+  getDomain(item);
+
+ const score =
+  getScore(item);
+
+ const category =
+  getCategory(item);
+
+ const confidence =
+  getConfidence(score);
+
+ const evidence =
+  getEvidence(item);
+
+ const url =
+  getUrl(item);
+
+ const result =
+  getResultObject(item);
+
+ show("details");
+
+ let evidenceHtml =
+  "";
+
+ if(evidence.length){
+
+  evidenceHtml =
+   evidence
+    .map(
+     text =>
+      `
+       <div class="evidence-row">
+        <span class="evidence-icon">
+         ✓
+        </span>
+
+        <span class="evidence-text">
+         ${esc(text)}
+        </span>
+       </div>
+      `
+    )
+    .join("");
+
+ }
+ else{
+
+  evidenceHtml =
+   '<div class="muted">' +
+   'No readable evidence returned.' +
+   '</div>';
+ }
+
+ const safeUrl =
+  validUrl(url)
+   ? url
+   : "";
+
  document.getElementById(
   "detail"
- ).innerHTML =
+ ).innerHTML = `
 
- `<h1>
-   ${esc(
-    item.site_name ||
-    "Domain Details"
-   )}
-  </h1>
+  <div class="detail-card">
 
-  <div class="card">
-
-   <div class="domain">
-    ${esc(item.domain)}
+   <div class="detail-title">
+    ${esc(domain)}
    </div>
 
-   <p>
-    ${esc(
-     item.category ||
-     "Investment"
-    )}
-   </p>
-
-   <span class="badge">
-    Score: ${item.score ?? "-"}
+   <span class="detail-category">
+    ${esc(category)}
    </span>
 
-   <span class="badge">
-    Confidence:
-    ${esc(
-     item.confidence ||
-     "Unknown"
-    )}
-   </span>
+   <div class="detail-score">
+    ${score}
+   </div>
+
+   <div class="confidence">
+    ${esc(confidence)} Confidence
+   </div>
 
   </div>
 
-  <div class="card">
+
+  <div class="detail-card">
 
    <h2>Domain Information</h2>
 
-   ${itemRow(
-    "Domain",
-    item.domain
-   )}
+   <div class="item">
+    <b>Domain</b>
+    <span>
+     ${esc(domain)}
+    </span>
+   </div>
 
-   ${itemRow(
-    "Website",
-    item.url
-   )}
+   <div class="item">
+    <b>Website</b>
+    <span>
+     ${
+      safeUrl
+       ? `<a href="${escAttr(safeUrl)}"
+          target="_blank"
+          rel="noopener">
+          ${esc(safeUrl)}
+         </a>`
+       : "Unavailable"
+     }
+    </span>
+   </div>
 
-   ${itemRow(
-    "Registration Date",
-    item.registration_date
-   )}
+   <div class="item">
+    <b>Detection Score</b>
+    <span>
+     ${score}
+    </span>
+   </div>
 
-   ${itemRow(
-    "Registrar",
-    item.registrar
-   )}
-
-   ${itemRow(
-    "Expiry",
-    item.expiry
-   )}
-
-   ${itemRow(
-    "Status",
-    item.status
-   )}
-
-   ${itemRow(
-    "Nameservers",
-    item.nameservers
-   )}
+   <div class="item">
+    <b>Detection Category</b>
+    <span>
+     ${esc(category)}
+    </span>
+   </div>
 
   </div>
 
-  <div class="card">
+
+  <div class="detail-card evidence">
 
    <h2>Evidence</h2>
 
-   ${
-    (item.evidence || [])
-     .map(
-      evidence =>
-       `<div class="item">
-        ${esc(evidence)}
-       </div>`
-     )
-     .join("")
-    ||
-    "<p>No evidence supplied.</p>"
-   }
+   ${evidenceHtml}
 
   </div>
 
-  <div class="row">
 
-   <button
-    class="primary"
-    onclick="openSite('${escAttr(item.domain)}')">
-    OPEN WEBSITE
-   </button>
+  ${
+   safeUrl
+    ? `
+     <a
+      class="open-button"
+      href="${escAttr(safeUrl)}"
+      target="_blank"
+      rel="noopener">
+      OPEN WEBSITE
+     </a>
+    `
+    : ""
+  }
 
-   <button
-    class="secondary"
-    onclick="rdap('${escAttr(item.domain)}')">
-    RDAP
-   </button>
 
-  </div>`;
+  <button
+   class="rdap-button"
+   onclick="loadRdap(${JSON.stringify(domain)})">
+   RDAP
+  </button>
 
- show("details");
+
+  <div
+   id="rdapBox"
+   class="rdap-box"
+   style="display:none">
+  </div>
+ `;
+
 }
 
 
-function itemRow(
- label,
- value
-){
+async function loadRdap(domain){
 
- return `
- <div class="item">
-  <b>${esc(label)}</b>
-  <span>
-   ${esc(
-    Array.isArray(value)
-     ? value.join(", ")
-     : value ||
-       "Unavailable"
-   )}
-  </span>
- </div>`;
-}
+ const box =
+  document.getElementById(
+   "rdapBox"
+  );
 
+ if(!box){
+  return;
+ }
 
-function openSite(domain){
+ box.style.display =
+  "block";
 
- location.href =
-  "https://" + domain;
-}
-
-
-async function rdap(domain){
+ box.textContent =
+  "Loading RDAP information...";
 
  try{
 
@@ -1049,66 +1424,156 @@ async function rdap(domain){
   const data =
    await response.json();
 
-  alert(
-   JSON.stringify(
-    data,
-    null,
-    2
-   )
-  );
+  if(!response.ok){
+
+   throw new Error(
+    data.detail ||
+    "RDAP request failed."
+   );
+  }
+
+  box.textContent =
+   formatRdap(data);
 
  }
  catch(error){
 
-  alert(
-   "RDAP unavailable"
-  );
+  box.textContent =
+   "RDAP unavailable: " +
+   (error.message || "Unknown error");
  }
 }
 
 
-function theme(){
+function formatRdap(data){
 
- const body =
-  document.body;
+ if(!data){
+  return "No RDAP information available.";
+ }
 
- const toggle =
-  document.getElementById(
-   "themeToggle"
+ if(typeof data === "string"){
+  return data;
+ }
+
+ const lines = [];
+
+ const domain =
+  data.domain ||
+  data.ldhName ||
+  data.name;
+
+ if(domain){
+  lines.push(
+   "Domain: " + domain
   );
+ }
 
- const light =
-  body.classList.toggle(
-   "light"
+ const registration =
+  data.registration_date ||
+  data.registrationDate ||
+  data.created;
+
+ if(registration){
+  lines.push(
+   "Registration: " +
+   registration
   );
+ }
 
- toggle.classList.toggle(
-  "on",
-  !light
+ const expiry =
+  data.expiry ||
+  data.expirationDate ||
+  data.expires;
+
+ if(expiry){
+  lines.push(
+   "Expiry: " +
+   expiry
+  );
+ }
+
+ const registrar =
+  data.registrar ||
+  data.registrar_name;
+
+ if(registrar){
+  lines.push(
+   "Registrar: " +
+   registrar
+  );
+ }
+
+ const status =
+  data.status;
+
+ if(status){
+
+  if(Array.isArray(status)){
+   lines.push(
+    "Status: " +
+    status.join(", ")
+   );
+  }
+  else{
+   lines.push(
+    "Status: " +
+    status
+   );
+  }
+ }
+
+ const nameservers =
+  data.nameservers ||
+  data.name_servers;
+
+ if(nameservers){
+
+  if(Array.isArray(nameservers)){
+   lines.push(
+    "Nameservers: " +
+    nameservers.join(", ")
+   );
+  }
+  else{
+   lines.push(
+    "Nameservers: " +
+    nameservers
+   );
+  }
+ }
+
+ if(lines.length){
+  return lines.join("\n");
+ }
+
+ return JSON.stringify(
+  data,
+  null,
+  2
  );
-
- localStorage.theme =
-  light
-   ? "light"
-   : "dark";
 }
 
 
-if(
- localStorage.theme === "light"
-){
+function validUrl(value){
 
- document.body.classList.add(
-  "light"
- );
+ if(!value){
+  return false;
+ }
 
- document
-  .getElementById(
-   "themeToggle"
-  )
-  .classList.remove(
-   "on"
+ try{
+
+  const url =
+   new URL(value);
+
+  return (
+   url.protocol === "http:" ||
+   url.protocol === "https:"
   );
+
+ }
+ catch(_){
+  return false;
+ }
 }
 
 
@@ -1118,26 +1583,48 @@ function esc(value){
   value ?? ""
  )
  .replace(
-  /[&<>"']/g,
-  character =>
-   ({
-    "&":"&amp;",
-    "<":"&lt;",
-    ">":"&gt;",
-    '"':"&quot;",
-    "'":"&#39;"
-   })[character]
+  /&/g,
+  "&amp;"
+ )
+ .replace(
+  /</g,
+  "&lt;"
+ )
+ .replace(
+  />/g,
+  "&gt;"
+ )
+ .replace(
+  /"/g,
+  "&quot;"
+ )
+ .replace(
+  /'/g,
+  "&#039;"
  );
 }
 
 
 function escAttr(value){
 
- return esc(value)
-  .replace(
-   /`/g,
-   "&#96;"
+ return esc(value);
+}
+
+
+function theme(){
+
+ const button =
+  document.getElementById(
+   "themeToggle"
   );
+
+ document.body.classList.toggle(
+  "light"
+ );
+
+ button.classList.toggle(
+  "on"
+ );
 }
 
 </script>
