@@ -6,13 +6,13 @@
  * DISCOVERY ENGINE
  * =================
  *
- * DISCOVER.JS KA SIRF EK KAAM:
+ * discover.js ka sirf ye kaam hai:
  *
- * 1. Selected TLD ke domains discover karo
- * 2. Registration date RDAP se verify karo
- * 3. Selected time period ke domains return karo
+ * 1. Selected TLD ke domains discover karna
+ * 2. RDAP se actual registration date verify karna
+ * 3. Selected time period ke domains return karna
  *
- * IS FILE MEIN:
+ * Yahan:
  * ❌ Investment filtering nahi
  * ❌ Crypto filtering nahi
  * ❌ Payment filtering nahi
@@ -30,8 +30,6 @@ const RDAP_TIMEOUT_MS = 6000;
 
 const SMET_CONCURRENCY = 6;
 const RDAP_CONCURRENCY = 20;
-
-const MAX_DISCOVERY_DAYS = 30;
 
 
 /* =========================================================
@@ -64,13 +62,6 @@ function errorMessage(error) {
     error?.message ||
     String(error || "Unknown error")
   );
-}
-
-
-function sleep(ms) {
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
 }
 
 
@@ -113,38 +104,32 @@ function normalizePeriod(body) {
   const periods = {
     "1d": {
       key: "1d",
-      days: 1,
-      hours: 24
+      days: 1
     },
 
     "3d": {
       key: "3d",
-      days: 3,
-      hours: 72
+      days: 3
     },
 
     "7d": {
       key: "7d",
-      days: 7,
-      hours: 168
+      days: 7
     },
 
     "15d": {
       key: "15d",
-      days: 15,
-      hours: 360
+      days: 15
     },
 
     "1m": {
       key: "1m",
-      days: 30,
-      hours: 720
+      days: 30
     },
 
     "30d": {
       key: "1m",
-      days: 30,
-      hours: 720
+      days: 30
     }
   };
 
@@ -231,7 +216,6 @@ async function mapConcurrent(
             items[index],
             index
           );
-
       } catch (error) {
         results[index] = {
           ok: false,
@@ -241,18 +225,29 @@ async function mapConcurrent(
     }
   }
 
-  const workers = Math.min(
+  if (!items.length) {
+    return results;
+  }
+
+  const workerCount = Math.min(
     concurrency,
     items.length
   );
 
+  const workers = [];
+
+  for (
+    let i = 0;
+    i < workerCount;
+    i++
+  ) {
+    workers.push(
+      runner()
+    );
+  }
+
   await Promise.all(
-    Array.from(
-      {
-        length: workers
-      },
-      runner
-    )
+    workers
   );
 
   return results;
@@ -339,12 +334,8 @@ async function fetchJson(
     if (!result.ok) {
       return {
         ok: false,
-
-        status:
-          result.status,
-
+        status: result.status,
         data: null,
-
         error:
           `HTTP ${result.status}`
       };
@@ -353,27 +344,19 @@ async function fetchJson(
     try {
       return {
         ok: true,
-
-        status:
-          result.status,
-
+        status: result.status,
         data:
           JSON.parse(
             result.text
           ),
-
         error: null
       };
 
-    } catch (error) {
+    } catch {
       return {
         ok: false,
-
-        status:
-          result.status,
-
+        status: result.status,
         data: null,
-
         error:
           "Invalid JSON response"
       };
@@ -382,11 +365,8 @@ async function fetchJson(
   } catch (error) {
     return {
       ok: false,
-
       status: null,
-
       data: null,
-
       error:
         errorMessage(error)
     };
@@ -399,12 +379,12 @@ async function fetchJson(
 ========================================================= */
 
 /*
- * Smet is used ONLY as a discovery source.
+ * Smet is ONLY a discovery source.
  *
- * Smet date means first observed by that dataset.
- * It is NOT treated as the registration date.
+ * Smet observation date is NOT treated
+ * as the actual registration date.
  *
- * RDAP below performs the actual registration verification.
+ * RDAP verifies the actual registration date.
  */
 
 function smetUrl(date) {
@@ -423,7 +403,10 @@ function dateKey(date) {
 }
 
 
-function addDays(date, days) {
+function addDays(
+  date,
+  days
+) {
   const copy =
     new Date(
       date.getTime()
@@ -437,26 +420,36 @@ function addDays(date, days) {
 }
 
 
-function extractDomainsFromSmet(data) {
+function extractDomainsFromSmet(
+  data
+) {
   const output = [];
 
   if (Array.isArray(data)) {
     for (const item of data) {
-      if (typeof item === "string") {
+
+      if (
+        typeof item ===
+        "string"
+      ) {
         output.push(item);
         continue;
       }
 
       if (
         item &&
-        typeof item === "object"
+        typeof item ===
+        "object"
       ) {
         const domain =
           item.domain ||
           item.name ||
           item.hostname;
 
-        if (typeof domain === "string") {
+        if (
+          typeof domain ===
+          "string"
+        ) {
           output.push(domain);
         }
       }
@@ -465,7 +458,8 @@ function extractDomainsFromSmet(data) {
 
   if (
     data &&
-    typeof data === "object" &&
+    typeof data ===
+    "object" &&
     !Array.isArray(data)
   ) {
     const possibleArrays = [
@@ -479,16 +473,26 @@ function extractDomainsFromSmet(data) {
       const list
       of possibleArrays
     ) {
-      if (!Array.isArray(list)) {
+      if (
+        !Array.isArray(list)
+      ) {
         continue;
       }
 
-      for (const item of list) {
-        if (typeof item === "string") {
+      for (
+        const item
+        of list
+      ) {
+        if (
+          typeof item ===
+          "string"
+        ) {
           output.push(item);
+
         } else if (
           item &&
-          typeof item === "object"
+          typeof item ===
+          "object"
         ) {
           const domain =
             item.domain ||
@@ -496,7 +500,8 @@ function extractDomainsFromSmet(data) {
             item.hostname;
 
           if (
-            typeof domain === "string"
+            typeof domain ===
+            "string"
           ) {
             output.push(domain);
           }
@@ -511,7 +516,9 @@ function extractDomainsFromSmet(data) {
 }
 
 
-async function fetchSmetDay(date) {
+async function fetchSmetDay(
+  date
+) {
   const key =
     dateKey(date);
 
@@ -528,11 +535,8 @@ async function fetchSmetDay(date) {
     if (!result.ok) {
       return {
         ok: false,
-
         date: key,
-
         domains: [],
-
         error:
           result.error
       };
@@ -540,25 +544,19 @@ async function fetchSmetDay(date) {
 
     return {
       ok: true,
-
       date: key,
-
       domains:
         extractDomainsFromSmet(
           result.data
         ),
-
       error: null
     };
 
   } catch (error) {
     return {
       ok: false,
-
       date: key,
-
       domains: [],
-
       error:
         errorMessage(error)
     };
@@ -571,20 +569,29 @@ async function fetchSmetDay(date) {
 ========================================================= */
 
 /*
- * crt.sh is ONLY a secondary discovery source.
+ * crt.sh is ONLY a secondary
+ * discovery source.
  *
- * IMPORTANT:
- * CT issuance/discovery time is NOT registration time.
+ * Certificate issuance date is NOT
+ * treated as registration date.
  */
 
 async function fetchCrtDomains(
   tld
 ) {
+  const cleanTld =
+    tld.replace(
+      /^\./,
+      ""
+    );
+
   const pattern =
-    `%.${tld.replace(/^\./, "")}`;
+    `%.${cleanTld}`;
 
   const encoded =
-    encodeURIComponent(pattern);
+    encodeURIComponent(
+      pattern
+    );
 
   const url =
     "https://crt.sh/?" +
@@ -618,9 +625,11 @@ async function fetchCrtDomains(
     ) {
       const names =
         String(
-          item?.name_value || ""
-        )
-          .split(/\r?\n/);
+          item?.name_value ||
+          ""
+        ).split(
+          /\r?\n/
+        );
 
       for (
         const name
@@ -632,14 +641,16 @@ async function fetchCrtDomains(
           );
 
         if (domain) {
-          domains.push(domain);
+          domains.push(
+            domain
+          );
         }
       }
     }
 
-    return [
-      ...new Set(domains)
-    ];
+    return Array.from(
+      new Set(domains)
+    );
 
   } catch {
     return [];
@@ -651,15 +662,21 @@ async function fetchCrtDomains(
    RDAP
 ========================================================= */
 
-function rdapUrl(domain) {
+function rdapUrl(
+  domain
+) {
   return (
     "https://rdap.org/domain/" +
-    encodeURIComponent(domain)
+    encodeURIComponent(
+      domain
+    )
   );
 }
 
 
-function parseRdapEvents(data) {
+function parseRdapEvents(
+  data
+) {
   const events =
     Array.isArray(
       data?.events
@@ -667,29 +684,27 @@ function parseRdapEvents(data) {
       ? data.events
       : [];
 
-  const registrationEvents =
-    events.filter(
-      event => {
-        const action =
-          String(
-            event?.eventAction || ""
-          )
-            .trim()
-            .toLowerCase();
-
-        return (
-          action ===
-            "registration" ||
-          action ===
-            "registered"
-        );
-      }
-    );
-
   for (
     const event
-    of registrationEvents
+    of events
   ) {
+    const action =
+      String(
+        event?.eventAction ||
+        ""
+      )
+        .trim()
+        .toLowerCase();
+
+    if (
+      action !==
+        "registration" &&
+      action !==
+        "registered"
+    ) {
+      continue;
+    }
+
     const value =
       event?.eventDate;
 
@@ -729,14 +744,10 @@ async function verifyRegistration(
     if (!result.ok) {
       return {
         ok: false,
-
         domain,
-
         registeredAt: null,
-
         registrationVerified:
           false,
-
         error:
           result.error
       };
@@ -750,14 +761,10 @@ async function verifyRegistration(
     if (!registeredAt) {
       return {
         ok: false,
-
         domain,
-
         registeredAt: null,
-
         registrationVerified:
           false,
-
         error:
           "RDAP registration event not found"
       };
@@ -765,29 +772,21 @@ async function verifyRegistration(
 
     return {
       ok: true,
-
       domain,
-
       registeredAt:
         registeredAt.toISOString(),
-
       registrationVerified:
         true,
-
       error: null
     };
 
   } catch (error) {
     return {
       ok: false,
-
       domain,
-
       registeredAt: null,
-
       registrationVerified:
         false,
-
       error:
         errorMessage(error)
     };
@@ -858,6 +857,14 @@ function isRegistrationInPeriod(
    SOURCE MERGE
 ========================================================= */
 
+/*
+ * IMPORTANT:
+ *
+ * No spread operator is used here.
+ * This avoids call-stack overflow when
+ * discovery returns thousands of domains.
+ */
+
 function mergeDomains(
   smetDomains,
   crtDomains,
@@ -866,12 +873,8 @@ function mergeDomains(
   const map =
     new Map();
 
-  for (
-    const domain
-    of [
-      ...smetDomains,
-      ...crtDomains
-    ]
+  function addDomain(
+    domain
   ) {
     const normalized =
       normalizeDomain(
@@ -879,7 +882,7 @@ function mergeDomains(
       );
 
     if (!normalized) {
-      continue;
+      return;
     }
 
     if (
@@ -887,18 +890,38 @@ function mergeDomains(
         tld
       )
     ) {
-      continue;
+      return;
     }
 
-    map.set(
-      normalized,
-      normalized
-    );
+    if (
+      !map.has(
+        normalized
+      )
+    ) {
+      map.set(
+        normalized,
+        normalized
+      );
+    }
   }
 
-  return [
-    ...map.values()
-  ];
+  for (
+    const domain
+    of smetDomains
+  ) {
+    addDomain(domain);
+  }
+
+  for (
+    const domain
+    of crtDomains
+  ) {
+    addDomain(domain);
+  }
+
+  return Array.from(
+    map.values()
+  );
 }
 
 
@@ -906,342 +929,352 @@ function mergeDomains(
    HANDLER
 ========================================================= */
 
-module.exports = async function handler(
-  req,
-  res
-) {
-  if (
-    req.method !==
-    "POST"
+module.exports =
+  async function handler(
+    req,
+    res
   ) {
-    return sendJson(
-      res,
-      405,
-      {
-        ok: false,
-
-        error:
-          "Method not allowed"
-      }
-    );
-  }
-
-  const startedAt =
-    Date.now();
-
-  try {
-    const body =
-      req.body || {};
-
-    const tld =
-      normalizeTld(
-        body.tld
-      );
-
-    if (!tld) {
+    if (
+      req.method !==
+      "POST"
+    ) {
       return sendJson(
         res,
-        400,
+        405,
         {
           ok: false,
-
           error:
-            "Invalid TLD"
+            "Method not allowed"
         }
       );
     }
 
-    const period =
-      normalizePeriod(
-        body
-      );
+    const startedAt =
+      Date.now();
 
-    /*
-     * ============================================
-     * DISCOVERY WINDOW
-     * ============================================
-     *
-     * We fetch only the selected period
-     * from the discovery sources.
-     */
+    try {
+      const body =
+        req.body || {};
 
-    const today =
-      new Date();
+      /* =========================================
+         TLD
+      ========================================= */
 
-    const smetDates = [];
-
-    for (
-      let i = 0;
-      i < period.days;
-      i++
-    ) {
-      smetDates.push(
-        addDays(
-          today,
-          -i
-        )
-      );
-    }
-
-    /*
-     * ============================================
-     * SMET
-     * ============================================
-     */
-
-    const smetResults =
-      await mapConcurrent(
-        smetDates,
-        SMET_CONCURRENCY,
-        fetchSmetDay
-      );
-
-    const smetDomains = [];
-
-    for (
-      const result
-      of smetResults
-    ) {
-      if (
-        !result?.ok
-      ) {
-        continue;
-      }
-
-      smetDomains.push(
-        ...result.domains
-      );
-    }
-
-    /*
-     * ============================================
-     * CRT.SH
-     * ============================================
-     *
-     * Secondary discovery source.
-     */
-
-    const crtDomains =
-      await fetchCrtDomains(
-        tld
-      );
-
-    /*
-     * ============================================
-     * MERGE
-     * ============================================
-     */
-
-    const discoveredDomains =
-      mergeDomains(
-        smetDomains,
-        crtDomains,
-        tld
-      );
-
-    /*
-     * ============================================
-     * RDAP
-     * ============================================
-     *
-     * Every returned domain must have an actual
-     * RDAP registration event.
-     */
-
-    const rdapResults =
-      await mapConcurrent(
-        discoveredDomains,
-        RDAP_CONCURRENCY,
-        verifyRegistration
-      );
-
-    const candidates = [];
-
-    let registrationVerifiedCount =
-      0;
-
-    let registrationInWindowCount =
-      0;
-
-    for (
-      const result
-      of rdapResults
-    ) {
-      if (
-        !result ||
-        !result.registrationVerified
-      ) {
-        continue;
-      }
-
-      registrationVerifiedCount++;
-
-      const inWindow =
-        isRegistrationInPeriod(
-          result.registeredAt,
-          period
+      const tld =
+        normalizeTld(
+          body.tld
         );
 
-      if (!inWindow) {
-        continue;
+      if (!tld) {
+        return sendJson(
+          res,
+          400,
+          {
+            ok: false,
+            error:
+              "Invalid TLD"
+          }
+        );
       }
 
-      registrationInWindowCount++;
+      /* =========================================
+         PERIOD
+      ========================================= */
 
-      candidates.push({
-        domain:
-          result.domain,
+      const period =
+        normalizePeriod(
+          body
+        );
 
-        registeredAt:
-          result.registeredAt,
+      /* =========================================
+         TODAY
+      ========================================= */
 
-        registrationVerified:
-          true,
+      const today =
+        new Date();
 
-        registrationInWindow:
-          true,
+      /* =========================================
+         SMET DATES
+      ========================================= */
 
-        discoveredAt:
-          today.toISOString(),
+      const smetDates = [];
 
-        discoverySources: [
+      for (
+        let i = 0;
+        i < period.days;
+        i++
+      ) {
+        smetDates.push(
+          addDays(
+            today,
+            -i
+          )
+        );
+      }
+
+      /* =========================================
+         SMET DISCOVERY
+      ========================================= */
+
+      const smetResults =
+        await mapConcurrent(
+          smetDates,
+          SMET_CONCURRENCY,
+          fetchSmetDay
+        );
+
+      const smetDomains = [];
+
+      for (
+        const result
+        of smetResults
+      ) {
+        if (
+          !result?.ok
+        ) {
+          continue;
+        }
+
+        /*
+         * DO NOT use:
+         *
+         * smetDomains.push(
+         *   ...result.domains
+         * )
+         *
+         * because thousands of arguments
+         * can cause stack overflow.
+         */
+
+        for (
+          const domain
+          of result.domains || []
+        ) {
+          smetDomains.push(
+            domain
+          );
+        }
+      }
+
+      /* =========================================
+         CRT.SH DISCOVERY
+      ========================================= */
+
+      const crtDomains =
+        await fetchCrtDomains(
+          tld
+        );
+
+      /* =========================================
+         MERGE + DEDUPE
+      ========================================= */
+
+      const discoveredDomains =
+        mergeDomains(
+          smetDomains,
+          crtDomains,
+          tld
+        );
+
+      /* =========================================
+         RDAP VERIFICATION
+      ========================================= */
+
+      const rdapResults =
+        await mapConcurrent(
+          discoveredDomains,
+          RDAP_CONCURRENCY,
+          verifyRegistration
+        );
+
+      const candidates = [];
+
+      let registrationVerifiedCount =
+        0;
+
+      let registrationInWindowCount =
+        0;
+
+      /* =========================================
+         PERIOD FILTER
+      ========================================= */
+
+      for (
+        const result
+        of rdapResults
+      ) {
+        if (
+          !result ||
+          !result.registrationVerified
+        ) {
+          continue;
+        }
+
+        registrationVerifiedCount++;
+
+        const inWindow =
+          isRegistrationInPeriod(
+            result.registeredAt,
+            period
+          );
+
+        if (!inWindow) {
+          continue;
+        }
+
+        registrationInWindowCount++;
+
+        const discoverySources = [];
+
+        if (
           smetDomains.includes(
             result.domain
           )
-            ? "smet"
-            : null,
+        ) {
+          discoverySources.push(
+            "smet"
+          );
+        }
 
+        if (
           crtDomains.includes(
             result.domain
           )
-            ? "crt.sh"
-            : null
-        ].filter(Boolean),
+        ) {
+          discoverySources.push(
+            "crt.sh"
+          );
+        }
 
-        tld,
+        candidates.push({
+          domain:
+            result.domain,
 
-        period:
-          period.key
-      });
-    }
-
-    /*
-     * ============================================
-     * FINAL DEDUPLICATION
-     * ============================================
-     */
-
-    const finalMap =
-      new Map();
-
-    for (
-      const candidate
-      of candidates
-    ) {
-      if (
-        !finalMap.has(
-          candidate.domain
-        )
-      ) {
-        finalMap.set(
-          candidate.domain,
-          candidate
-        );
-      }
-    }
-
-    const finalCandidates =
-      [
-        ...finalMap.values()
-      ];
-
-    /*
-     * ============================================
-     * RESULT
-     * ============================================
-     *
-     * IMPORTANT:
-     *
-     * "relevant" is NOT calculated here.
-     *
-     * Scanner receives ALL domains that passed
-     * discovery + registration verification +
-     * selected period.
-     */
-
-    return sendJson(
-      res,
-      200,
-      {
-        ok: true,
-
-        tld,
-
-        period:
-          period.key,
-
-        periodDays:
-          period.days,
-
-        discoveredCount:
-          discoveredDomains.length,
-
-        registrationVerifiedCount,
-
-        registrationInWindowCount,
-
-        candidates:
-          finalCandidates,
-
-        /*
-         * Alias kept for compatibility with
-         * existing frontend/backend code.
-         */
-        domains:
-          finalCandidates,
-
-        stats: {
-          discovered:
-            discoveredDomains.length,
+          registeredAt:
+            result.registeredAt,
 
           registrationVerified:
-            registrationVerifiedCount,
+            true,
 
           registrationInWindow:
-            registrationInWindowCount,
+            true,
 
-          final:
-            finalCandidates.length,
+          discoveredAt:
+            today.toISOString(),
 
-          smetDomains:
-            smetDomains.length,
+          discoverySources,
 
-          crtDomains:
-            crtDomains.length
-        },
+          tld,
 
-        discoveryOnly:
-          true,
-
-        discoveryTimeMs:
-          Date.now() -
-          startedAt
+          period:
+            period.key
+        });
       }
-    );
 
-  } catch (error) {
-    return sendJson(
-      res,
-      500,
-      {
-        ok: false,
+      /* =========================================
+         FINAL DEDUPLICATION
+      ========================================= */
 
-        stage:
-          "discovery",
+      const finalMap =
+        new Map();
 
-        error:
-          errorMessage(error)
+      for (
+        const candidate
+        of candidates
+      ) {
+        if (
+          !finalMap.has(
+            candidate.domain
+          )
+        ) {
+          finalMap.set(
+            candidate.domain,
+            candidate
+          );
+        }
       }
-    );
-  }
-};
+
+      const finalCandidates =
+        Array.from(
+          finalMap.values()
+        );
+
+      /* =========================================
+         FINAL RESPONSE
+      ========================================= */
+
+      return sendJson(
+        res,
+        200,
+        {
+          ok: true,
+
+          tld,
+
+          period:
+            period.key,
+
+          periodDays:
+            period.days,
+
+          discoveredCount:
+            discoveredDomains.length,
+
+          registrationVerifiedCount,
+
+          registrationInWindowCount,
+
+          candidates:
+            finalCandidates,
+
+          /*
+           * Frontend compatibility.
+           */
+          domains:
+            finalCandidates,
+
+          stats: {
+            discovered:
+              discoveredDomains.length,
+
+            registrationVerified:
+              registrationVerifiedCount,
+
+            registrationInWindow:
+              registrationInWindowCount,
+
+            final:
+              finalCandidates.length,
+
+            smetDomains:
+              smetDomains.length,
+
+            crtDomains:
+              crtDomains.length
+          },
+
+          discoveryOnly:
+            true,
+
+          discoveryTimeMs:
+            Date.now() -
+            startedAt
+        }
+      );
+
+    } catch (error) {
+      return sendJson(
+        res,
+        500,
+        {
+          ok: false,
+
+          stage:
+            "discovery",
+
+          error:
+            errorMessage(error)
+        }
+      );
+    }
+  };
