@@ -3,15 +3,15 @@
 /*
  * LD76 INVESTMENT RADAR
  *
- * DISCOVERY v5
+ * DISCOVERY v6
  *
  * FLOW:
  *
- * Smet NRD / crt.sh discovery
+ * Smet NRD / crt.sh
  *        ↓
  * TLD filter
  *        ↓
- * Investment / earning / finance / payment name filter
+ * BROAD domain-name relevance filter
  *        ↓
  * Deduplicate
  *        ↓
@@ -22,44 +22,25 @@
  * Final candidates
  *
  * IMPORTANT:
- * - Smet/CT discovery date is NOT treated as registration date.
- * - RDAP registration event is required.
- * - If RDAP registration date cannot be verified, domain is rejected.
+ * - Discovery timestamp is NOT registration timestamp.
+ * - RDAP registration event is mandatory.
+ * - Domains without verified registration date are rejected.
  * - No arbitrary 4/5/10 domain limit.
- * - 1D / 3D / 7D / 15D / 1M are supported.
- * - All failures are returned as structured JSON.
+ * - Supports 1d / 3d / 7d / 15d / 1m.
  */
-
-
-/* =========================================================
- * CONFIG
- * ========================================================= */
 
 const SMET_TIMEOUT_MS = 12000;
 const CRT_TIMEOUT_MS = 12000;
-const RDAP_TIMEOUT_MS = 4500;
+const RDAP_TIMEOUT_MS = 5000;
 
 const SMET_RETRIES = 1;
 const CRT_RETRIES = 1;
 const RDAP_RETRIES = 1;
 
-/*
- * Keep RDAP concurrency reasonable.
- * Too much parallel RDAP traffic can trigger 429 responses.
- */
-const RDAP_CONCURRENCY = 12;
-
-/*
- * Smet day feeds are fetched in small batches instead of
- * launching 30+ requests at once for the 1-month period.
- */
 const SMET_CONCURRENCY = 6;
+const RDAP_CONCURRENCY = 10;
 
-/*
- * Keep enough time for RDAP and JSON response before
- * Vercel's own timeout can generate a non-JSON error.
- */
-const DISCOVERY_BUDGET_MS = 70000;
+const DISCOVERY_BUDGET_MS = 80000;
 
 const FUTURE_TOLERANCE_MS =
   5 * 60 * 1000;
@@ -109,7 +90,7 @@ function sendJson(res, status, payload) {
 
 
 /* =========================================================
- * ERROR HELPERS
+ * ERROR
  * ========================================================= */
 
 function errorMessage(error) {
@@ -165,17 +146,6 @@ function normalizeTld(value) {
 }
 
 
-/*
- * Supported frontend values:
- *
- * 1d
- * 3d
- * 7d
- * 15d
- * 1m
- *
- * Also accept old 24h / 48h values for compatibility.
- */
 function normalizePeriod(body) {
   const raw =
     String(
@@ -255,24 +225,6 @@ function normalizePeriod(body) {
     };
   }
 
-  /*
-   * Compatibility with the old app.js request format.
-   */
-  const hours =
-    Number(
-      body?.periodHours
-    );
-
-  if (
-    hours === 48
-  ) {
-    return {
-      key: "3d",
-      hours: 72,
-      days: 3
-    };
-  }
-
   return {
     key: "1d",
     hours: 24,
@@ -328,7 +280,7 @@ function normalizeDomain(value) {
   }
 
   const valid =
-    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/;
 
   if (
     !valid.test(domain)
@@ -414,7 +366,7 @@ async function fetchRaw(
               "application/json,text/plain,*/*",
 
             "User-Agent":
-              "LD76-Investment-Radar/5.0",
+              "LD76-Investment-Radar/6.0",
 
             ...headers
           },
@@ -607,9 +559,7 @@ async function fetchJson(
   ) {
     return {
       ...result,
-
       data: null,
-
       parseError: null
     };
   }
@@ -650,7 +600,451 @@ async function fetchJson(
 
 
 /* =========================================================
- * SMET NRD
+ * BROAD DOMAIN-NAME FILTER
+ *
+ * This is ONLY a discovery prefilter.
+ * It is NOT a scam score.
+ *
+ * Important:
+ * We deliberately use stems and variants so that:
+ *
+ * investmentxyz
+ * invest-now
+ * profitplus
+ * earninghub
+ * cashflow
+ * cryptopay
+ * walletzone
+ *
+ * can all survive discovery.
+ * ========================================================= */
+
+const INVESTMENT_TERMS = [
+  "invest",
+  "inves",
+  "investment",
+  "investor",
+  "investing",
+
+  "profit",
+  "profi",
+  "profits",
+  "profitable",
+
+  "earn",
+  "earning",
+  "earnings",
+  "earner",
+
+  "income",
+  "incomes",
+
+  "roi",
+  "return",
+  "returns",
+
+  "yield",
+  "yields",
+
+  "wealth",
+  "rich",
+  "money",
+  "cash",
+  "cashflow",
+
+  "capital",
+  "capitals",
+
+  "finance",
+  "financial",
+  "fintech",
+
+  "fund",
+  "funds",
+  "funding",
+  "funded",
+
+  "trade",
+  "trader",
+  "trading",
+  "trades",
+
+  "forex",
+  "fx",
+
+  "crypto",
+  "cryptocurrency",
+  "cryptos",
+
+  "bitcoin",
+  "btc",
+
+  "ethereum",
+  "eth",
+
+  "coin",
+  "coins",
+  "token",
+  "tokens",
+
+  "usdt",
+  "tether",
+
+  "staking",
+  "stake",
+
+  "mining",
+  "miner",
+  "miners",
+  "cloudmine",
+  "cryptomine",
+
+  "deposit",
+  "deposits",
+
+  "withdraw",
+  "withdrawal",
+  "withdrawals",
+
+  "wallet",
+  "wallets",
+
+  "bonus",
+  "bonuses",
+
+  "referral",
+  "referrals",
+
+  "affiliate",
+  "affiliates",
+
+  "commission",
+  "commissions",
+
+  "payment",
+  "payments",
+  "pay",
+
+  "bank",
+  "banking",
+
+  "loan",
+  "loans",
+
+  "credit",
+  "credits",
+
+  "asset",
+  "assets",
+
+  "portfolio",
+  "portfolios",
+
+  "broker",
+  "brokers",
+
+  "exchange",
+  "exchanges",
+
+  "passive",
+  "passiveincome",
+
+  "profitshare",
+  "profitsharing",
+
+  "highyield",
+  "highreturn",
+
+  "fixedreturn",
+  "fixedprofit",
+
+  "dailyprofit",
+  "dailyincome",
+  "dailyreturn",
+  "dailyearning",
+
+  "profitplan",
+  "investmentplan",
+  "investmentplans",
+
+  "earningplan",
+  "earningplans",
+
+  "depositbonus",
+  "referralbonus",
+  "affiliatebonus"
+];
+
+
+const PAYMENT_TERMS = [
+  "easypaisa",
+  "easycash",
+
+  "jazzcash",
+
+  "sadapay",
+  "sada",
+
+  "nayapay",
+  "naya",
+
+  "pkr",
+  "pkrupee",
+  "rupee",
+  "rupees",
+
+  "pakistan",
+  "pakistani",
+
+  "iban",
+
+  "accountnumber",
+  "accounttitle",
+  "bankaccount",
+  "banktransfer",
+  "bankdeposit",
+
+  "usdt",
+  "trc20",
+  "erc20",
+  "bep20",
+
+  "bitcoin",
+  "btc",
+  "ethereum",
+  "eth",
+  "crypto",
+  "cryptowallet",
+
+  "paypal"
+];
+
+
+const HIGH_SIGNAL_TERMS = [
+  "dailyprofit",
+  "dailyincome",
+  "dailyreturn",
+  "dailyearning",
+
+  "highyield",
+  "highreturn",
+
+  "fixedprofit",
+  "fixedreturn",
+
+  "passiveincome",
+
+  "investmentplan",
+  "investmentplans",
+
+  "profitplan",
+
+  "earningplan",
+  "earningplans",
+
+  "depositbonus",
+
+  "referralbonus",
+
+  "affiliatebonus"
+];
+
+
+function compactDomainName(
+  domain
+) {
+  return domain
+    .split(".")
+    .slice(
+      0,
+      -1
+    )
+    .join("")
+    .replace(
+      /[-_]/g,
+      ""
+    )
+    .toLowerCase();
+}
+
+
+function getDomainNameSignals(
+  domain
+) {
+  const name =
+    compactDomainName(
+      domain
+    );
+
+  const investmentMatches =
+    INVESTMENT_TERMS.filter(
+      term =>
+        name.includes(
+          term
+        )
+    );
+
+  const paymentMatches =
+    PAYMENT_TERMS.filter(
+      term =>
+        name.includes(
+          term
+        )
+    );
+
+  const highSignalMatches =
+    HIGH_SIGNAL_TERMS.filter(
+      term =>
+        name.includes(
+          term
+        )
+    );
+
+  return {
+    name,
+
+    investmentMatches:
+      [
+        ...new Set(
+          investmentMatches
+        )
+      ],
+
+    paymentMatches:
+      [
+        ...new Set(
+          paymentMatches
+        )
+      ],
+
+    highSignalMatches:
+      [
+        ...new Set(
+          highSignalMatches
+        )
+      ]
+  };
+}
+
+
+function investmentNameMatch(
+  domain
+) {
+  const signals =
+    getDomainNameSignals(
+      domain
+    );
+
+  /*
+   * One direct investment/finance/
+   * earning term is enough.
+   */
+  if (
+    signals
+      .investmentMatches
+      .length > 0
+  ) {
+    return true;
+  }
+
+  /*
+   * One strong payment term can also
+   * pass because the website scanner
+   * will perform the real verification.
+   */
+  if (
+    signals
+      .paymentMatches
+      .length > 0
+  ) {
+    return true;
+  }
+
+  /*
+   * High-signal compound terms.
+   */
+  if (
+    signals
+      .highSignalMatches
+      .length > 0
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+
+/* =========================================================
+ * CONCURRENT MAP
+ * ========================================================= */
+
+async function mapConcurrent(
+  items,
+  concurrency,
+  worker
+) {
+  const results =
+    new Array(
+      items.length
+    );
+
+  let nextIndex = 0;
+
+  async function runner() {
+    while (true) {
+      const index =
+        nextIndex++;
+
+      if (
+        index >=
+        items.length
+      ) {
+        return;
+      }
+
+      try {
+        results[index] =
+          await worker(
+            items[index],
+            index
+          );
+
+      } catch (error) {
+        results[index] = {
+          ok: false,
+
+          error:
+            errorMessage(
+              error
+            )
+        };
+      }
+    }
+  }
+
+  const count =
+    Math.min(
+      concurrency,
+      items.length
+    );
+
+  await Promise.all(
+    Array.from(
+      {
+        length:
+          count
+      },
+      runner
+    )
+  );
+
+  return results;
+}
+
+
+/* =========================================================
+ * SMET
  * ========================================================= */
 
 function buildSmetJsonUrl(
@@ -747,7 +1141,7 @@ async function fetchSmetDay(
       count: 0,
 
       error:
-        "Smet JSON does not contain a domains array",
+        "Smet response does not contain a domains array",
 
       diagnostic: {
         status:
@@ -817,419 +1211,6 @@ async function fetchSmetDay(
 }
 
 
-/* =========================================================
- * INVESTMENT / FINANCE NAME FILTER
- * =========================================================
- *
- * This is intentionally broad.
- *
- * It is only a DISCOVERY prefilter.
- * It is NOT the Gemini scam score.
- */
-
-const STRONG_INVESTMENT_PATTERNS = [
-  "invest",
-  "investment",
-  "investor",
-  "investors",
-  "investing",
-
-  "profit",
-  "profits",
-  "profitable",
-
-  "earning",
-  "earnings",
-  "earner",
-  "earn",
-
-  "income",
-  "incomes",
-
-  "roi",
-  "return",
-  "returns",
-
-  "yield",
-  "yields",
-
-  "wealth",
-
-  "capital",
-  "capitals",
-
-  "finance",
-  "financial",
-  "fintech",
-
-  "fund",
-  "funds",
-  "funding",
-  "funded",
-
-  "trading",
-  "trade",
-  "trader",
-  "traders",
-
-  "forex",
-  "fx",
-
-  "crypto",
-  "cryptocurrency",
-  "cryptos",
-
-  "bitcoin",
-  "btc",
-
-  "ethereum",
-  "eth",
-
-  "usdt",
-  "tether",
-
-  "staking",
-  "stake",
-
-  "mining",
-  "miner",
-  "miners",
-
-  "passiveincome",
-  "passive",
-
-  "deposit",
-  "deposits",
-
-  "withdraw",
-  "withdrawal",
-  "withdrawals",
-
-  "wallet",
-  "wallets",
-
-  "bonus",
-  "bonuses",
-
-  "referral",
-  "referrals",
-
-  "affiliate",
-  "affiliates",
-
-  "commission",
-  "commissions",
-
-  "pay",
-  "payment",
-  "payments",
-
-  "bank",
-  "banking",
-
-  "loan",
-  "loans",
-
-  "asset",
-  "assets",
-
-  "portfolio",
-  "portfolios",
-
-  "broker",
-  "brokers",
-
-  "exchange",
-  "exchanges",
-
-  "cash",
-
-  "money",
-
-  "profitshare",
-  "profitsharing",
-
-  "highyield",
-  "highreturn",
-
-  "fixedreturn",
-  "fixedprofit",
-
-  "dailyprofit",
-  "dailyincome",
-  "dailyreturn",
-  "dailyearning"
-];
-
-
-const PAYMENT_PATTERNS = [
-  "easypaisa",
-  "easycash",
-
-  "jazzcash",
-  "jazzcash",
-
-  "sadapay",
-  "sada",
-
-  "nayapay",
-  "naya",
-
-  "pkr",
-  "pkrupee",
-  "rupee",
-  "rupees",
-
-  "pakistan",
-  "pakistani",
-
-  "iban",
-
-  "accountnumber",
-  "accounttitle",
-  "bankaccount",
-  "banktransfer",
-  "bankdeposit",
-
-  "usdt",
-  "trc20",
-  "erc20",
-  "bep20",
-
-  "bitcoin",
-  "btc",
-  "ethereum",
-  "eth",
-
-  "crypto",
-  "cryptowallet",
-
-  "paypal"
-];
-
-
-const HIGH_SIGNAL_PATTERNS = [
-  "dailyprofit",
-  "dailyincome",
-  "dailyreturn",
-  "dailyearning",
-
-  "highyield",
-  "highreturn",
-
-  "fixedprofit",
-  "fixedreturn",
-
-  "passiveincome",
-
-  "profitplan",
-  "investmentplan",
-  "investmentplans",
-
-  "earningplan",
-  "earningplans",
-
-  "referralbonus",
-  "affiliatebonus",
-
-  "depositbonus",
-  "withdrawal"
-];
-
-
-function compactDomainName(
-  domain
-) {
-  return domain
-    .split(".")
-    .slice(
-      0,
-      -1
-    )
-    .join("")
-    .replace(
-      /[-_]/g,
-      ""
-    )
-    .toLowerCase();
-}
-
-
-function getDomainNameSignals(
-  domain
-) {
-  const name =
-    compactDomainName(
-      domain
-    );
-
-  const strongMatches =
-    STRONG_INVESTMENT_PATTERNS
-      .filter(
-        keyword =>
-          name.includes(
-            keyword
-          )
-      );
-
-  const paymentMatches =
-    PAYMENT_PATTERNS
-      .filter(
-        keyword =>
-          name.includes(
-            keyword
-          )
-      );
-
-  const highSignalMatches =
-    HIGH_SIGNAL_PATTERNS
-      .filter(
-        keyword =>
-          name.includes(
-            keyword
-          )
-      );
-
-  return {
-    name,
-
-    strongMatches:
-      [
-        ...new Set(
-          strongMatches
-        )
-      ],
-
-    paymentMatches:
-      [
-        ...new Set(
-          paymentMatches
-        )
-      ],
-
-    highSignalMatches:
-      [
-        ...new Set(
-          highSignalMatches
-        )
-      ]
-  };
-}
-
-
-function investmentNameMatch(
-  domain
-) {
-  const signals =
-    getDomainNameSignals(
-      domain
-    );
-
-  /*
-   * Any direct investment/earning/finance
-   * term is enough for discovery.
-   */
-  if (
-    signals.strongMatches
-      .length > 0
-  ) {
-    return true;
-  }
-
-  /*
-   * Payment terms alone are generally too broad,
-   * so require at least two payment-related signals.
-   */
-  if (
-    signals.paymentMatches
-      .length >= 2
-  ) {
-    return true;
-  }
-
-  /*
-   * High-signal phrases always pass.
-   */
-  if (
-    signals.highSignalMatches
-      .length > 0
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-
-/* =========================================================
- * CONCURRENT MAP HELPER
- * ========================================================= */
-
-async function mapConcurrent(
-  items,
-  concurrency,
-  worker
-) {
-  const results =
-    new Array(
-      items.length
-    );
-
-  let nextIndex = 0;
-
-  async function runner() {
-    while (true) {
-      const index =
-        nextIndex++;
-
-      if (
-        index >=
-        items.length
-      ) {
-        return;
-      }
-
-      try {
-        results[index] =
-          await worker(
-            items[index],
-            index
-          );
-      } catch (error) {
-        results[index] = {
-          ok: false,
-
-          error:
-            errorMessage(error)
-        };
-      }
-    }
-  }
-
-  const count =
-    Math.min(
-      concurrency,
-      items.length
-    );
-
-  await Promise.all(
-    Array.from(
-      {
-        length:
-          count
-      },
-      runner
-    )
-  );
-
-  return results;
-}
-
-
-/* =========================================================
- * SMET DISCOVERY
- * ========================================================= */
-
 function buildRequestedDates(
   days
 ) {
@@ -1279,13 +1260,11 @@ async function discoverFromSmet(
   const successful =
     results.filter(
       item =>
-        item?.ok ===
-        true
+        item?.ok === true
     );
 
   if (
-    successful.length ===
-    0
+    !successful.length
   ) {
     return {
       ok: false,
@@ -1296,7 +1275,7 @@ async function discoverFromSmet(
         results,
 
       error:
-        "Smet newly-observed domain feed failed for every requested day",
+        "Smet feed failed for every requested day",
 
       statistics: {
         requestedDays:
@@ -1348,36 +1327,49 @@ async function discoverFromSmet(
 
       nameMatches++;
 
-      if (
-        !map.has(
+      const existing =
+        map.get(
           domain
-        )
-      ) {
-        map.set(
-          domain,
-          {
-            domain,
-
-            discoveredAt:
-              new Date()
-                .toISOString(),
-
-            discoveryEvidence:
-              "smet-newly-observed-domain-feed",
-
-            discoverySource:
-              source.url,
-
-            feedDate:
-              source.date,
-
-            nameSignals:
-              getDomainNameSignals(
-                domain
-              )
-          }
         );
+
+      if (
+        existing
+      ) {
+        existing.discoveryEvidence =
+          existing.discoveryEvidence.includes(
+            "smet"
+          )
+            ? existing.discoveryEvidence
+            : existing.discoveryEvidence +
+              "+smet";
+
+        continue;
       }
+
+      map.set(
+        domain,
+        {
+          domain,
+
+          discoveredAt:
+            new Date()
+              .toISOString(),
+
+          discoveryEvidence:
+            "smet-nrd",
+
+          discoverySource:
+            source.url,
+
+          feedDate:
+            source.date,
+
+          nameSignals:
+            getDomainNameSignals(
+              domain
+            )
+        }
+      );
     }
   }
 
@@ -1425,14 +1417,6 @@ async function discoverFromSmet(
 function buildCrtUrl(
   tld
 ) {
-  /*
-   * IMPORTANT:
-   *
-   * Use %.top / %.xyz etc.
-   * encodeURIComponent() is called exactly once.
-   *
-   * This prevents the previous %25.top double-encoding bug.
-   */
   const query =
     `%${tld}`;
 
@@ -1694,36 +1678,117 @@ function collectCtCandidates(
       }
 
       if (
-        !map.has(
+        map.has(
           domain
         )
       ) {
-        map.set(
-          domain,
-          {
-            domain,
-
-            discoveredAt:
-              date.toISOString(),
-
-            discoveryEvidence:
-              "certificate-transparency",
-
-            discoverySource:
-              "crt.sh",
-
-            nameSignals:
-              getDomainNameSignals(
-                domain
-              )
-          }
-        );
+        continue;
       }
+
+      map.set(
+        domain,
+        {
+          domain,
+
+          discoveredAt:
+            date.toISOString(),
+
+          discoveryEvidence:
+            "certificate-transparency",
+
+          discoverySource:
+            "crt.sh",
+
+          nameSignals:
+            getDomainNameSignals(
+              domain
+            )
+        }
+      );
     }
   }
 
   return [
     ...map.values()
+  ];
+}
+
+
+/* =========================================================
+ * MERGE
+ * ========================================================= */
+
+function mergeCandidates(
+  smetCandidates,
+  ctCandidates
+) {
+  const merged =
+    new Map();
+
+  for (
+    const candidate
+    of smetCandidates
+  ) {
+    merged.set(
+      candidate.domain,
+      {
+        ...candidate
+      }
+    );
+  }
+
+  for (
+    const candidate
+    of ctCandidates
+  ) {
+    const existing =
+      merged.get(
+        candidate.domain
+      );
+
+    if (
+      !existing
+    ) {
+      merged.set(
+        candidate.domain,
+        {
+          ...candidate
+        }
+      );
+
+      continue;
+    }
+
+    const evidence =
+      new Set(
+        String(
+          existing.discoveryEvidence ||
+          ""
+        )
+          .split("+")
+          .filter(Boolean)
+      );
+
+    evidence.add(
+      "certificate-transparency"
+    );
+
+    existing.discoveryEvidence =
+      [
+        ...evidence
+      ].join("+");
+
+    if (
+      !existing.discoveredAt &&
+      candidate.discoveredAt
+    ) {
+      existing.discoveredAt =
+        candidate.discoveredAt;
+    }
+  }
+
+  return [
+    ...merged.values()
   ];
 }
 
@@ -1961,90 +2026,7 @@ async function verifyCandidates(
 
 
 /* =========================================================
- * MERGE CANDIDATES
- * ========================================================= */
-
-function mergeCandidates(
-  smetCandidates,
-  ctCandidates
-) {
-  const merged =
-    new Map();
-
-  for (
-    const candidate
-    of smetCandidates
-  ) {
-    merged.set(
-      candidate.domain,
-      {
-        ...candidate
-      }
-    );
-  }
-
-  for (
-    const candidate
-    of ctCandidates
-  ) {
-    const existing =
-      merged.get(
-        candidate.domain
-      );
-
-    if (
-      !existing
-    ) {
-      merged.set(
-        candidate.domain,
-        {
-          ...candidate
-        }
-      );
-
-      continue;
-    }
-
-    const evidence =
-      new Set(
-        String(
-          existing.discoveryEvidence ||
-          ""
-        )
-          .split("+")
-          .filter(Boolean)
-      );
-
-    evidence.add(
-      "certificate-transparency"
-    );
-
-    existing.discoveryEvidence =
-      [
-        ...evidence
-      ].join("+");
-
-    /*
-     * Prefer CT timestamp when Smet does not have
-     * a useful timestamp.
-     */
-    if (
-      !existing.discoveredAt &&
-      candidate.discoveredAt
-    ) {
-      existing.discoveredAt =
-        candidate.discoveredAt;
-    }
-  }
-
-  return [
-    ...merged.values()
-  ];
-}
-
-
-/* =========================================================
- * MAIN HANDLER
+ * HANDLER
  * ========================================================= */
 
 export default async function handler(
@@ -2133,8 +2115,8 @@ export default async function handler(
 
 
     /* =====================================================
-     * SMET PRIMARY
-     * ===================================================== */
+       SOURCE 1 — SMET
+    ===================================================== */
 
     const smet =
       await discoverFromSmet(
@@ -2144,15 +2126,9 @@ export default async function handler(
 
 
     /* =====================================================
-     * CRT SECONDARY
-     * ===================================================== */
+       SOURCE 2 — CRT.SH
+    ===================================================== */
 
-    /*
-     * CRT failure is NEVER fatal if Smet succeeded.
-     *
-     * For a one-month scan CRT can be large/slow,
-     * but it remains a useful secondary source.
-     */
     const crt =
       await queryCrtSh(
         tld
@@ -2169,8 +2145,8 @@ export default async function handler(
 
 
     /* =====================================================
-     * MERGE
-     * ===================================================== */
+       MERGE
+    ===================================================== */
 
     const discoveryCandidates =
       mergeCandidates(
@@ -2182,8 +2158,8 @@ export default async function handler(
 
 
     /* =====================================================
-     * BOTH SOURCES FAILED
-     * ===================================================== */
+       BOTH SOURCES FAILED
+    ===================================================== */
 
     if (
       !smet.ok &&
@@ -2263,12 +2239,11 @@ export default async function handler(
 
 
     /* =====================================================
-     * NO DISCOVERY CANDIDATES
-     * ===================================================== */
+       NO NAME-RELEVANT DISCOVERY CANDIDATES
+    ===================================================== */
 
     if (
-      discoveryCandidates.length ===
-      0
+      !discoveryCandidates.length
     ) {
       return sendJson(
         res,
@@ -2319,25 +2294,7 @@ export default async function handler(
 
               statistics:
                 smet.statistics ||
-                null,
-
-              days:
-                smet.sourceResults
-                  .map(
-                    item => ({
-                      date:
-                        item.date,
-
-                      ok:
-                        item.ok,
-
-                      count:
-                        item.count,
-
-                      error:
-                        item.error
-                    })
-                  )
+                null
             },
 
             crtSh: {
@@ -2351,34 +2308,48 @@ export default async function handler(
                 ctCandidates.length,
 
               diagnostic:
-                crt.diagnostic
+                crt.diagnostic ||
+                null
             }
           },
 
-          statistics: {
-            smetCandidates:
-              smet.candidates
-                ?.length ||
+          diagnostics: {
+            message:
+              "No domain-name candidates matched the broad investment/payment discovery filter.",
+
+            tld,
+
+            period:
+              period.key,
+
+            smetTldMatches:
+              smet.statistics
+                ?.tldMatches ||
+              0,
+
+            smetNameMatches:
+              smet.statistics
+                ?.nameMatches ||
               0,
 
             ctCandidates:
               ctCandidates.length,
 
-            mergedCandidates:
-              0
-          },
+            discoveryCandidates:
+              0,
 
-          elapsedMs:
-            Date.now() -
-            requestStarted
+            elapsedMs:
+              Date.now() -
+              requestStarted
+          }
         }
       );
     }
 
 
     /* =====================================================
-     * RDAP REGISTRATION VERIFICATION
-     * ===================================================== */
+       RDAP REGISTRATION VERIFICATION
+    ===================================================== */
 
     const rdapResults =
       await verifyCandidates(
@@ -2421,8 +2392,8 @@ export default async function handler(
 
 
     /* =====================================================
-     * FINAL CANDIDATES
-     * ===================================================== */
+       BUILD FINAL CANDIDATES
+    ===================================================== */
 
     const discoveryMap =
       new Map(
@@ -2487,8 +2458,8 @@ export default async function handler(
 
 
     /* =====================================================
-     * RETURN
-     * ===================================================== */
+       RETURN
+    ===================================================== */
 
     return sendJson(
       res,
@@ -2560,7 +2531,7 @@ export default async function handler(
 
                     diagnostic:
                       item.ok
-                        ? undefined
+                        ? null
                         : item.diagnostic
                   })
                 )
@@ -2577,7 +2548,8 @@ export default async function handler(
               ctCandidates.length,
 
             diagnostic:
-              crt.diagnostic
+              crt.diagnostic ||
+              null
           },
 
           rdap: {
@@ -2622,11 +2594,18 @@ export default async function handler(
                 Date.now()
             ),
 
+          smetStatistics:
+            smet.statistics ||
+            null,
+
+          crtCandidates:
+            ctCandidates.length,
+
           rdapFailures:
             failed
               .slice(
                 0,
-                50
+                100
               )
               .map(
                 item => ({
@@ -2649,7 +2628,7 @@ export default async function handler(
             outsideWindow
               .slice(
                 0,
-                50
+                100
               )
               .map(
                 item => ({
@@ -2706,4 +2685,4 @@ export default async function handler(
       }
     );
   }
-            }
+      }
