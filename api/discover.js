@@ -3,7 +3,7 @@
 /*
  * LD76 INVESTMENT RADAR
  *
- * DISCOVERY v6
+ * DISCOVERY v7
  *
  * FLOW:
  *
@@ -11,23 +11,31 @@
  *        ↓
  * TLD filter
  *        ↓
- * BROAD domain-name relevance filter
+ * SMART FINANCIAL DOMAIN-NAME FILTER
  *        ↓
  * Deduplicate
  *        ↓
- * RDAP registration-event verification
+ * RDAP REGISTRATION VERIFICATION
  *        ↓
  * Selected registration-date window
  *        ↓
  * Final candidates
  *
  * IMPORTANT:
- * - Discovery timestamp is NOT registration timestamp.
- * - RDAP registration event is mandatory.
- * - Domains without verified registration date are rejected.
- * - No arbitrary 4/5/10 domain limit.
- * - Supports 1d / 3d / 7d / 15d / 1m.
+ *
+ * 1. Discovery timestamp is NOT registration timestamp.
+ * 2. RDAP registration event is mandatory.
+ * 3. Payment-only words are NOT discovery signals.
+ * 4. Generic words such as bank/pay/cash/coin/eth are NOT enough.
+ * 5. No arbitrary 4/5/10-domain limit.
+ * 6. This file is only discovery/relevance filtering.
+ * 7. Gemini scam scoring happens later.
  */
+
+
+/* =========================================================
+ * CONFIG
+ * ========================================================= */
 
 const SMET_TIMEOUT_MS = 12000;
 const CRT_TIMEOUT_MS = 12000;
@@ -38,7 +46,7 @@ const CRT_RETRIES = 1;
 const RDAP_RETRIES = 1;
 
 const SMET_CONCURRENCY = 6;
-const RDAP_CONCURRENCY = 10;
+const RDAP_CONCURRENCY = 18;
 
 const DISCOVERY_BUDGET_MS = 80000;
 
@@ -50,7 +58,11 @@ const FUTURE_TOLERANCE_MS =
  * RESPONSE
  * ========================================================= */
 
-function sendJson(res, status, payload) {
+function sendJson(
+  res,
+  status,
+  payload
+) {
   try {
     res.status(status);
 
@@ -359,14 +371,15 @@ async function fetchRaw(
       await fetch(
         url,
         {
-          method: "GET",
+          method:
+            "GET",
 
           headers: {
             Accept:
               "application/json,text/plain,*/*",
 
             "User-Agent":
-              "LD76-Investment-Radar/6.0",
+              "LD76-Investment-Radar/7.0",
 
             ...headers
           },
@@ -407,7 +420,8 @@ async function fetchRaw(
         error?.name ===
         "AbortError"
           ? `Request timeout after ${timeoutMs}ms`
-          : errorMessage(error)
+          :
+            errorMessage(error)
       ),
       {
         originalName:
@@ -501,7 +515,9 @@ async function fetchWithRetry(
 
     } catch (error) {
       lastError =
-        errorMessage(error);
+        errorMessage(
+          error
+        );
 
       if (
         attempt <
@@ -518,13 +534,17 @@ async function fetchWithRetry(
   return {
     ok: false,
 
-    status: null,
+    status:
+      null,
 
-    statusText: null,
+    statusText:
+      null,
 
-    contentType: null,
+    contentType:
+      null,
 
-    bodyPreview: null,
+    bodyPreview:
+      null,
 
     url,
 
@@ -590,7 +610,9 @@ async function fetchJson(
       data: null,
 
       parseError:
-        errorMessage(error),
+        errorMessage(
+          error
+        ),
 
       error:
         "Server returned non-JSON data"
@@ -600,266 +622,242 @@ async function fetchJson(
 
 
 /* =========================================================
- * BROAD DOMAIN-NAME FILTER
+ * SMART DOMAIN-NAME FILTER
  *
- * This is ONLY a discovery prefilter.
- * It is NOT a scam score.
+ * IMPORTANT:
  *
- * Important:
- * We deliberately use stems and variants so that:
+ * Do NOT use generic payment words here.
  *
- * investmentxyz
- * invest-now
- * profitplus
- * earninghub
- * cashflow
- * cryptopay
- * walletzone
+ * BAD:
+ * pay
+ * bank
+ * cash
+ * coin
+ * eth
+ * sada
+ * naya
+ * payment
  *
- * can all survive discovery.
+ * Those create huge false-positive volumes.
+ *
+ * We want domains whose NAME itself has a meaningful
+ * financial/investment/earning/trading intent.
  * ========================================================= */
 
-const INVESTMENT_TERMS = [
+
+/*
+ * Direct strong financial terms.
+ *
+ * These are allowed individually because they have
+ * meaningful financial intent.
+ */
+
+const STRONG_TERMS = [
   "invest",
-  "inves",
   "investment",
   "investor",
   "investing",
 
   "profit",
-  "profi",
   "profits",
-  "profitable",
+  "profitshare",
 
-  "earn",
   "earning",
   "earnings",
   "earner",
 
   "income",
-  "incomes",
+  "passiveincome",
 
   "roi",
-  "return",
-  "returns",
 
   "yield",
-  "yields",
+  "highyield",
 
   "wealth",
-  "rich",
-  "money",
-  "cash",
-  "cashflow",
-
-  "capital",
-  "capitals",
-
-  "finance",
-  "financial",
-  "fintech",
-
-  "fund",
-  "funds",
-  "funding",
-  "funded",
-
-  "trade",
-  "trader",
-  "trading",
-  "trades",
 
   "forex",
-  "fx",
-
-  "crypto",
-  "cryptocurrency",
-  "cryptos",
-
-  "bitcoin",
-  "btc",
-
-  "ethereum",
-  "eth",
-
-  "coin",
-  "coins",
-  "token",
-  "tokens",
-
-  "usdt",
-  "tether",
-
-  "staking",
-  "stake",
-
-  "mining",
-  "miner",
-  "miners",
-  "cloudmine",
-  "cryptomine",
-
-  "deposit",
-  "deposits",
-
-  "withdraw",
-  "withdrawal",
-  "withdrawals",
-
-  "wallet",
-  "wallets",
-
-  "bonus",
-  "bonuses",
-
-  "referral",
-  "referrals",
-
-  "affiliate",
-  "affiliates",
-
-  "commission",
-  "commissions",
-
-  "payment",
-  "payments",
-  "pay",
-
-  "bank",
-  "banking",
-
-  "loan",
-  "loans",
-
-  "credit",
-  "credits",
-
-  "asset",
-  "assets",
-
-  "portfolio",
-  "portfolios",
+  "trading",
+  "trader",
 
   "broker",
   "brokers",
 
-  "exchange",
-  "exchanges",
+  "portfolio",
 
-  "passive",
-  "passiveincome",
+  "fund",
+  "funds",
 
-  "profitshare",
-  "profitsharing",
+  "capital",
 
-  "highyield",
-  "highreturn",
+  "asset",
+  "assets",
 
-  "fixedreturn",
-  "fixedprofit",
+  "staking",
+  "staked",
 
-  "dailyprofit",
-  "dailyincome",
-  "dailyreturn",
-  "dailyearning",
+  "mining",
+  "miner",
 
-  "profitplan",
-  "investmentplan",
-  "investmentplans",
+  "cloudmining",
+  "cryptomining",
 
-  "earningplan",
-  "earningplans",
-
-  "depositbonus",
-  "referralbonus",
-  "affiliatebonus"
-];
-
-
-const PAYMENT_TERMS = [
-  "easypaisa",
-  "easycash",
-
-  "jazzcash",
-
-  "sadapay",
-  "sada",
-
-  "nayapay",
-  "naya",
-
-  "pkr",
-  "pkrupee",
-  "rupee",
-  "rupees",
-
-  "pakistan",
-  "pakistani",
-
-  "iban",
-
-  "accountnumber",
-  "accounttitle",
-  "bankaccount",
-  "banktransfer",
-  "bankdeposit",
-
-  "usdt",
-  "trc20",
-  "erc20",
-  "bep20",
+  "crypto",
+  "cryptocurrency",
 
   "bitcoin",
-  "btc",
+
   "ethereum",
-  "eth",
-  "crypto",
-  "cryptowallet",
 
-  "paypal"
-];
+  "usdt",
+  "tether",
 
+  "defi",
 
-const HIGH_SIGNAL_TERMS = [
-  "dailyprofit",
-  "dailyincome",
-  "dailyreturn",
-  "dailyearning",
-
-  "highyield",
-  "highreturn",
-
-  "fixedprofit",
-  "fixedreturn",
-
-  "passiveincome",
+  "exchange",
+  "tradingplatform",
 
   "investmentplan",
   "investmentplans",
 
   "profitplan",
+  "profitplans",
 
   "earningplan",
   "earningplans",
 
-  "depositbonus",
+  "dailyprofit",
+  "dailyincome",
+  "dailyreturn",
+  "dailyearning",
 
-  "referralbonus",
+  "fixedprofit",
+  "fixedreturn",
 
-  "affiliatebonus"
+  "highreturn",
+
+  "referralearning",
+  "referralprofit",
+
+  "affiliateearning",
+  "affiliateprofit"
+];
+
+
+/*
+ * Terms which are too generic when used alone.
+ *
+ * They can only work in a financial combination.
+ */
+
+const CONTEXT_TERMS = [
+  "trade",
+  "return",
+  "returns",
+  "profit",
+  "earn",
+  "income",
+
+  "crypto",
+  "token",
+  "tokens",
+  "coin",
+  "coins",
+
+  "stake",
+  "staking",
+
+  "mine",
+  "mining",
+
+  "wallet",
+
+  "deposit",
+  "withdraw",
+  "withdrawal",
+
+  "referral",
+  "affiliate",
+  "commission",
+  "bonus"
+];
+
+
+/*
+ * Strong combinations.
+ *
+ * These are specifically useful for HYIP / earning /
+ * investment / crypto-financial websites.
+ */
+
+const COMPOUND_PATTERNS = [
+  /crypto.*(invest|profit|earn|trade|trading|stake|staking|yield)/i,
+  /(invest|investment).*(crypto|bitcoin|ethereum|usdt|trading|forex)/i,
+
+  /(profit|earning|income).*(plan|daily|weekly|monthly|return)/i,
+  /(daily|weekly|monthly).*(profit|income|earning|return)/i,
+
+  /(fixed|high|guaranteed).*(profit|return|yield|income)/i,
+
+  /(deposit|stake|staking).*(profit|return|yield|income)/i,
+
+  /(profit|income|earning).*(referral|affiliate|commission)/i,
+
+  /(referral|affiliate).*(profit|income|earning|commission)/i,
+
+  /(investment|investing).*(plan|fund|portfolio|capital|profit|return)/i,
+
+  /(forex|trading).*(profit|income|signal|broker|platform)/i,
+
+  /(mining|miner).*(profit|income|return|cloud)/i,
+
+  /(staking|stake).*(yield|profit|return|income)/i,
+
+  /(usdt|bitcoin|ethereum|crypto).*(deposit|withdraw|profit|return)/i,
+
+  /(deposit|withdraw).*(crypto|usdt|bitcoin|ethereum)/i
+];
+
+
+/*
+ * Terms which strongly suggest a domain is simply a
+ * payment / banking utility rather than an investment site.
+ *
+ * They do NOT automatically reject the domain, but
+ * they reduce discovery relevance unless another
+ * strong financial signal exists.
+ */
+
+const PAYMENT_ONLY_TERMS = [
+  "payment",
+  "payments",
+  "pay",
+  "bank",
+  "banking",
+  "cash",
+  "cashier",
+  "invoice",
+  "billing",
+  "checkout",
+  "merchant",
+  "gateway",
+  "wallet"
 ];
 
 
 function compactDomainName(
   domain
 ) {
-  return domain
-    .split(".")
-    .slice(
-      0,
-      -1
-    )
-    .join("")
+  const labels =
+    domain
+      .split(".")
+      .slice(
+        0,
+        -1
+      );
+
+  return labels
+    .join("-")
     .replace(
       /[-_]/g,
       ""
@@ -868,64 +866,160 @@ function compactDomainName(
 }
 
 
+function domainNameTokens(
+  domain
+) {
+  const labels =
+    domain
+      .split(".")
+      .slice(
+        0,
+        -1
+      );
+
+  return labels
+    .join(" ")
+    .split(
+      /[^a-z0-9]+/i
+    )
+    .filter(Boolean)
+    .map(
+      token =>
+        token.toLowerCase()
+    );
+}
+
+
+function uniqueArray(
+  values
+) {
+  return [
+    ...new Set(
+      values
+        .filter(Boolean)
+    )
+  ];
+}
+
+
 function getDomainNameSignals(
   domain
 ) {
-  const name =
+  const compact =
     compactDomainName(
       domain
     );
 
-  const investmentMatches =
-    INVESTMENT_TERMS.filter(
-      term =>
-        name.includes(
-          term
-        )
+  const tokens =
+    domainNameTokens(
+      domain
     );
 
-  const paymentMatches =
-    PAYMENT_TERMS.filter(
-      term =>
-        name.includes(
-          term
-        )
+  const investmentMatches =
+    uniqueArray(
+      STRONG_TERMS.filter(
+        term =>
+          compact.includes(
+            term
+          )
+      )
+    );
+
+  const contextMatches =
+    uniqueArray(
+      CONTEXT_TERMS.filter(
+        term =>
+          compact.includes(
+            term
+          )
+      )
+    );
+
+  const compoundMatches =
+    COMPOUND_PATTERNS
+      .filter(
+        pattern =>
+          pattern.test(
+            compact
+          )
+      )
+      .map(
+        pattern =>
+          pattern.source
+      );
+
+  const paymentOnlyMatches =
+    uniqueArray(
+      PAYMENT_ONLY_TERMS.filter(
+        term =>
+          compact.includes(
+            term
+          )
+      )
     );
 
   const highSignalMatches =
-    HIGH_SIGNAL_TERMS.filter(
-      term =>
-        name.includes(
-          term
-        )
+    uniqueArray(
+      [
+        "dailyprofit",
+        "dailyincome",
+        "dailyreturn",
+        "dailyearning",
+        "highyield",
+        "highreturn",
+        "fixedprofit",
+        "fixedreturn",
+        "passiveincome",
+        "investmentplan",
+        "investmentplans",
+        "profitplan",
+        "profitplans",
+        "earningplan",
+        "earningplans",
+        "cloudmining",
+        "cryptomining",
+        "profitshare"
+      ].filter(
+        term =>
+          compact.includes(
+            term
+          )
+      )
     );
 
   return {
-    name,
+    name: compact,
 
-    investmentMatches:
-      [
-        ...new Set(
-          investmentMatches
-        )
-      ],
+    tokens,
 
-    paymentMatches:
-      [
-        ...new Set(
-          paymentMatches
-        )
-      ],
+    investmentMatches,
 
-    highSignalMatches:
-      [
-        ...new Set(
-          highSignalMatches
-        )
-      ]
+    contextMatches,
+
+    compoundMatches,
+
+    paymentOnlyMatches,
+
+    highSignalMatches
   };
 }
 
+
+/*
+ * Final discovery decision.
+ *
+ * IMPORTANT:
+ * Payment-only names do NOT pass.
+ *
+ * We prefer:
+ *
+ * 1. Strong direct financial term
+ * 2. Compound financial intent
+ * 3. Two contextual financial terms
+ *
+ * A generic crypto news/wallet/payment domain should
+ * not automatically pass.
+ */
 
 function investmentNameMatch(
   domain
@@ -935,40 +1029,96 @@ function investmentNameMatch(
       domain
     );
 
+  const {
+    investmentMatches,
+    contextMatches,
+    compoundMatches,
+    paymentOnlyMatches,
+    highSignalMatches
+  } = signals;
+
+
   /*
-   * One direct investment/finance/
-   * earning term is enough.
+   * Explicit compound financial intent.
    */
   if (
-    signals
-      .investmentMatches
-      .length > 0
+    compoundMatches.length >
+    0
   ) {
     return true;
   }
 
+
   /*
-   * One strong payment term can also
-   * pass because the website scanner
-   * will perform the real verification.
+   * High-signal financial names.
    */
   if (
-    signals
-      .paymentMatches
-      .length > 0
+    highSignalMatches.length >
+    0
   ) {
     return true;
   }
 
+
   /*
-   * High-signal compound terms.
+   * Strong direct financial term.
+   *
+   * But do not allow a payment-only word to pass.
    */
   if (
-    signals
-      .highSignalMatches
-      .length > 0
+    investmentMatches.length >
+    0
+  ) {
+    const onlyPayment =
+      investmentMatches.every(
+        term =>
+          PAYMENT_ONLY_TERMS.includes(
+            term
+          )
+      );
+
+    if (!onlyPayment) {
+      return true;
+    }
+  }
+
+
+  /*
+   * Two contextual financial signals can pass.
+   *
+   * Example:
+   * crypto + profit
+   * trading + income
+   * deposit + profit
+   *
+   * But a single generic word cannot.
+   */
+  const meaningfulContext =
+    contextMatches.filter(
+      term =>
+        !PAYMENT_ONLY_TERMS.includes(
+          term
+        )
+    );
+
+  if (
+    meaningfulContext.length >=
+    2
   ) {
     return true;
+  }
+
+
+  /*
+   * Reject payment-only domains.
+   */
+  if (
+    paymentOnlyMatches.length >
+    0 &&
+    meaningfulContext.length ===
+    0
+  ) {
+    return false;
   }
 
   return false;
@@ -1044,7 +1194,7 @@ async function mapConcurrent(
 
 
 /* =========================================================
- * SMET
+ * SMET NRD
  * ========================================================= */
 
 function buildSmetJsonUrl(
@@ -1190,7 +1340,8 @@ async function fetchSmetDay(
       result.data?.generated_at ||
       null,
 
-    error: null,
+    error:
+      null,
 
     diagnostic: {
       status:
@@ -1285,7 +1436,19 @@ async function discoverFromSmet(
           0,
 
         failedDays:
-          results.length
+          results.length,
+
+        totalFeedDomains:
+          0,
+
+        tldMatches:
+          0,
+
+        nameMatches:
+          0,
+
+        uniqueCandidates:
+          0
       }
     };
   }
@@ -1346,6 +1509,11 @@ async function discoverFromSmet(
         continue;
       }
 
+      const signals =
+        getDomainNameSignals(
+          domain
+        );
+
       map.set(
         domain,
         {
@@ -1365,9 +1533,7 @@ async function discoverFromSmet(
             source.date,
 
           nameSignals:
-            getDomainNameSignals(
-              domain
-            )
+            signals
         }
       );
     }
@@ -1383,6 +1549,9 @@ async function discoverFromSmet(
 
     sourceResults:
       results,
+
+    error:
+      null,
 
     statistics: {
       requestedDays:
@@ -1403,9 +1572,7 @@ async function discoverFromSmet(
 
       uniqueCandidates:
         map.size
-    },
-
-    error: null
+    }
   };
 }
 
@@ -1417,6 +1584,13 @@ async function discoverFromSmet(
 function buildCrtUrl(
   tld
 ) {
+  /*
+   * IMPORTANT:
+   *
+   * Use %.xyz, not %25.xyz.
+   * encodeURIComponent() performs the single
+   * required URL encoding.
+   */
   const query =
     `%${tld}`;
 
@@ -1521,7 +1695,8 @@ async function queryCrtSh(
 
     url,
 
-    error: null,
+    error:
+      null,
 
     diagnostic: {
       status:
@@ -1636,6 +1811,10 @@ function collectCtCandidates(
       continue;
     }
 
+    /*
+     * CT timestamp is discovery evidence only.
+     * It is NOT registration proof.
+     */
     if (
       date.getTime() <
       cutoff
@@ -1699,6 +1878,9 @@ function collectCtCandidates(
           discoverySource:
             "crt.sh",
 
+          feedDate:
+            null,
+
           nameSignals:
             getDomainNameSignals(
               domain
@@ -1746,9 +1928,7 @@ function mergeCandidates(
         candidate.domain
       );
 
-    if (
-      !existing
-    ) {
+    if (!existing) {
       merged.set(
         candidate.domain,
         {
@@ -1794,7 +1974,7 @@ function mergeCandidates(
 
 
 /* =========================================================
- * RDAP
+ * RDAP REGISTRATION VERIFICATION
  * ========================================================= */
 
 function extractRegistrationDate(
@@ -1854,11 +2034,14 @@ async function verifyRegistration(
     return {
       domain,
 
-      verified: false,
+      verified:
+        false,
 
-      inWindow: false,
+      inWindow:
+        false,
 
-      registeredAt: null,
+      registeredAt:
+        null,
 
       error:
         "RDAP verification skipped because discovery time budget was reached",
@@ -1887,11 +2070,14 @@ async function verifyRegistration(
     return {
       domain,
 
-      verified: false,
+      verified:
+        false,
 
-      inWindow: false,
+      inWindow:
+        false,
 
-      registeredAt: null,
+      registeredAt:
+        null,
 
       error:
         result.error ||
@@ -1937,11 +2123,14 @@ async function verifyRegistration(
     return {
       domain,
 
-      verified: false,
+      verified:
+        false,
 
-      inWindow: false,
+      inWindow:
+        false,
 
-      registeredAt: null,
+      registeredAt:
+        null,
 
       error:
         "RDAP registration event not found",
@@ -1977,7 +2166,8 @@ async function verifyRegistration(
   return {
     domain,
 
-    verified: true,
+    verified:
+      true,
 
     inWindow,
 
@@ -2195,7 +2385,8 @@ export default async function handler(
 
             sources: {
               smet: {
-                ok: false,
+                ok:
+                  false,
 
                 error:
                   smet.error,
@@ -2220,7 +2411,8 @@ export default async function handler(
               },
 
               crtSh: {
-                ok: false,
+                ok:
+                  false,
 
                 error:
                   crt.error,
@@ -2239,7 +2431,7 @@ export default async function handler(
 
 
     /* =====================================================
-       NO NAME-RELEVANT DISCOVERY CANDIDATES
+       NO NAME-RELEVANT CANDIDATES
     ===================================================== */
 
     if (
@@ -2282,7 +2474,8 @@ export default async function handler(
           verificationFailed:
             0,
 
-          candidates: [],
+          candidates:
+            [],
 
           sources: {
             smet: {
@@ -2315,7 +2508,13 @@ export default async function handler(
 
           diagnostics: {
             message:
-              "No domain-name candidates matched the broad investment/payment discovery filter.",
+              "No domains matched the smart financial domain-name filter.",
+
+            filterMode:
+              "SMART_FINANCIAL_INTENT",
+
+            paymentTermsUsedAsGate:
+              false,
 
             tld,
 
@@ -2565,6 +2764,12 @@ export default async function handler(
         },
 
         diagnostics: {
+          filterMode:
+            "SMART_FINANCIAL_INTENT",
+
+          paymentTermsUsedAsGate:
+            false,
+
           discoveryCandidates:
             discoveryCandidates.length,
 
@@ -2599,59 +2804,15 @@ export default async function handler(
             null,
 
           crtCandidates:
-            ctCandidates.length,
+            ctCandidates.length
+        },
 
-          rdapFailures:
-            failed
-              .slice(
-                0,
-                100
-              )
-              .map(
-                item => ({
-                  domain:
-                    item.domain,
-
-                  reason:
-                    item.reason,
-
-                  error:
-                    item.error,
-
-                  diagnostic:
-                    item.diagnostic ||
-                    null
-                })
-              ),
-
-          outsideWindow:
-            outsideWindow
-              .slice(
-                0,
-                100
-              )
-              .map(
-                item => ({
-                  domain:
-                    item.domain,
-
-                  registeredAt:
-                    item.registeredAt,
-
-                  reason:
-                    item.reason
-                })
-              )
-        }
+        error:
+          null
       }
     );
 
   } catch (error) {
-    console.error(
-      "LD76 DISCOVERY FATAL ERROR",
-      error
-    );
-
     return sendJson(
       res,
       500,
@@ -2667,22 +2828,11 @@ export default async function handler(
           ),
 
         diagnostic: {
-          errorName:
-            error?.name ||
-            "Error",
-
           elapsedMs:
             Date.now() -
-            requestStarted,
-
-          stack:
-            process.env.NODE_ENV !==
-            "production"
-              ? error?.stack ||
-                null
-              : null
+            requestStarted
         }
       }
     );
   }
-      }
+        }
