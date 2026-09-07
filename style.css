@@ -64,9 +64,7 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-/* -----------------------------
-   APP CONTAINER
------------------------------ */
+/* APP */
 
 #app,
 .app,
@@ -80,9 +78,7 @@ main {
   padding: 18px 14px 30px;
 }
 
-/* -----------------------------
-   HEADER
------------------------------ */
+/* HEADER */
 
 header,
 .app-header {
@@ -127,9 +123,7 @@ header button,
   place-items: center;
 }
 
-/* -----------------------------
-   SECTIONS
------------------------------ */
+/* SECTIONS */
 
 section {
   margin-bottom: 16px;
@@ -160,9 +154,7 @@ section {
   padding: 17px;
 }
 
-/* -----------------------------
-   SECTION TITLES
------------------------------ */
+/* TITLES */
 
 .section-title,
 section h2,
@@ -181,9 +173,7 @@ section h3 {
   font-weight: 750;
 }
 
-/* -----------------------------
-   FILTERS
------------------------------ */
+/* FILTERS */
 
 label {
   display: block;
@@ -212,44 +202,89 @@ select {
   margin-bottom: 0;
 }
 
-/* -----------------------------
-   SEGMENTED PERIOD BUTTONS
------------------------------ */
+/* PERIOD SELECTOR */
 
 .segmented,
 .period-buttons,
-.button-group {
+.button-group,
+.segmented-control,
+.period-selector {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  width: 100%;
 }
 
 .segmented button,
 .period-buttons button,
-.button-group button {
+.button-group button,
+.segmented-control button,
+.period-selector button,
+.period-button {
   min-height: 48px;
+  padding: 8px 6px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid var(--border);
   color: var(--muted);
+  font-size: 12px;
+  line-height: 1.2;
   font-weight: 750;
   cursor: pointer;
-  transition: 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.segmented button:active,
+.period-buttons button:active,
+.button-group button:active,
+.segmented-control button:active,
+.period-selector button:active,
+.period-button:active {
+  transform: scale(0.98);
 }
 
 .segmented button.active,
 .period-buttons button.active,
 .button-group button.active,
-.segmented button[aria-selected="true"] {
+.segmented-control button.active,
+.period-selector button.active,
+.period-button.active,
+.segmented button[aria-selected="true"],
+.period-selector button[aria-selected="true"] {
   background: linear-gradient(135deg, var(--primary), var(--primary-2));
   border-color: transparent;
   color: #fff;
   box-shadow: 0 8px 25px rgba(109, 93, 252, 0.3);
 }
 
-/* -----------------------------
-   PAYMENT METHODS
------------------------------ */
+/* 5TH PERIOD BUTTON */
+
+.period-selector .period-button:last-child {
+  grid-column: 1 / -1;
+}
+
+/* ACTIVE PERIOD LABEL */
+
+.active-period-label {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(109, 93, 252, 0.08);
+  border: 1px solid rgba(109, 93, 252, 0.16);
+  color: #bdb7ff;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.8px;
+  line-height: 1.35;
+}
+
+/* PAYMENT METHODS */
 
 .payment-methods,
 .checkbox-group,
@@ -286,9 +321,7 @@ select {
   flex: 0 0 auto;
 }
 
-/* -----------------------------
-   MAIN SCAN BUTTON
------------------------------ */
+/* MAIN SCAN BUTTON */
 
 #findButton,
 #findSitesButton,
@@ -306,7 +339,9 @@ button[type="submit"] {
   letter-spacing: 0.25px;
   cursor: pointer;
   box-shadow: 0 12px 30px rgba(109, 93, 252, 0.3);
-  transition: transform 0.15s ease, filter 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
 }
 
 #findButton:active,
@@ -326,9 +361,7 @@ button[type="submit"]:active {
   box-shadow: none;
 }
 
-/* -----------------------------
-   PROGRESS
------------------------------ */
+/* PROGRESS */
 
 .progress-card {
   position: relative;
@@ -357,6 +390,13 @@ button[type="submit"]:active {
   line-height: 1.55;
 }
 
+#progressDetails {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .progress-bar,
 .progress-track {
   width: 100%;
@@ -368,7 +408,8 @@ button[type="submit"]:active {
 }
 
 .progress-bar > *,
-.progress-fill {
+.progress-fill,
+#progressBarFill {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(
@@ -379,11 +420,10 @@ button[type="submit"]:active {
   transition: width 0.3s ease;
 }
 
-/* -----------------------------
-   RESULTS
------------------------------ */
+/* RESULTS */
 
-#results {
+#results,
+#resultsContainer {
   display: grid;
   gap: 13px;
 }
@@ -408,9 +448,7 @@ button[type="submit"]:active {
   word-break: break-all;
 }
 
-/* -----------------------------
-   GEMINI SCORE
------------------------------ */
+/* GEMINI SCORE */
 
 .scam-score,
 .gemini-score {
@@ -458,9 +496,7 @@ button[type="submit"]:active {
   font-size: 11px;
 }
 
-/* -----------------------------
-   EVIDENCE
------------------------------ */
+/* EVIDENCE */
 
 .evidence,
 .evidence-grid {
@@ -490,9 +526,7 @@ button[type="submit"]:active {
   line-height: 1.45;
 }
 
-/* -----------------------------
-   TAGS
------------------------------ */
+/* TAGS */
 
 .tags,
 .badges,
@@ -515,9 +549,7 @@ button[type="submit"]:active {
   font-weight: 750;
 }
 
-/* -----------------------------
-   RESULT ACTION
------------------------------ */
+/* RESULT ACTION */
 
 .result-card a,
 .open-website,
@@ -527,6 +559,7 @@ button[type="submit"]:active {
   justify-content: center;
   min-height: 45px;
   margin-top: 13px;
+  padding: 0 12px;
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
@@ -536,9 +569,7 @@ button[type="submit"]:active {
   font-weight: 800;
 }
 
-/* -----------------------------
-   EMPTY STATE
------------------------------ */
+/* EMPTY STATE */
 
 .empty-state,
 .no-results {
@@ -573,9 +604,7 @@ button[type="submit"]:active {
   line-height: 1.5;
 }
 
-/* -----------------------------
-   HISTORY
------------------------------ */
+/* HISTORY */
 
 .history-list {
   display: grid;
@@ -597,9 +626,7 @@ button[type="submit"]:active {
   font-size: 11px;
 }
 
-/* -----------------------------
-   SETTINGS
------------------------------ */
+/* SETTINGS */
 
 .settings-list {
   display: grid;
@@ -630,147 +657,87 @@ button[type="submit"]:active {
   font-size: 10px;
 }
 
-/* -----------------------------
-   BOTTOM NAV
------------------------------ */
+/* ERROR PANEL */
+
+.error-panel {
+  margin: 0 0 16px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 93, 115, 0.28);
+  background: rgba(255, 93, 115, 0.07);
+  color: #ffd9df;
+  overflow-wrap: anywhere;
+}
+
+.error-panel h3 {
+  margin: 0 0 9px;
+  color: #ff8fa0;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.error-panel pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d9dee8;
+  font-family: monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* BOTTOM NAV */
 
 .bottom-nav,
 nav.bottom-nav,
 footer.bottom-nav {
   position: fixed;
-  z-index: 100;
-  left: 10px;
-  right: 10px;
+  left: 50%;
   bottom: 10px;
-  max-width: 740px;
-  margin: 0 auto;
-  min-height: 66px;
+  z-index: 100;
+  width: min(720px, calc(100% - 20px));
+  transform: translateX(-50%);
+  min-height: 62px;
   padding: 7px;
-  border-radius: 21px;
-  background: rgba(13, 19, 32, 0.93);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  border-radius: 20px;
+  background: rgba(13, 19, 32, 0.94);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 5px;
+  gap: 6px;
 }
 
-.bottom-nav button,
-.bottom-nav a {
-  min-height: 50px;
-  border-radius: 15px;
+.bottom-nav button {
+  min-height: 48px;
+  border-radius: 14px;
   background: transparent;
   color: var(--muted);
-  text-decoration: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 750;
+  font-size: 11px;
+  font-weight: 800;
   cursor: pointer;
 }
 
-.bottom-nav button.active,
-.bottom-nav a.active {
-  background: rgba(109, 93, 252, 0.15);
+.bottom-nav button.active {
+  background: rgba(109, 93, 252, 0.14);
   color: #fff;
 }
 
-.bottom-nav .icon {
-  font-size: 18px;
-  line-height: 1;
-}
+/* RESPONSIVE */
 
-/* -----------------------------
-   MODAL / DRAWER
------------------------------ */
+@media (min-width: 560px) {
+  .period-selector {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 
-.modal,
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0, 0, 0, 0.68);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 12px;
-}
-
-.modal-content,
-.drawer,
-.sheet {
-  width: 100%;
-  max-width: 600px;
-  max-height: 88vh;
-  overflow-y: auto;
-  padding: 19px;
-  border-radius: 24px;
-  background: #101827;
-  border: 1px solid var(--border);
-  box-shadow: 0 -15px 60px rgba(0, 0, 0, 0.45);
-}
-
-/* -----------------------------
-   STATUS / ALERTS
------------------------------ */
-
-.alert,
-.error,
-.warning,
-.success {
-  padding: 12px 13px;
-  border-radius: 13px;
-  font-size: 11px;
-  line-height: 1.45;
-  border: 1px solid var(--border);
-}
-
-.error {
-  background: rgba(255, 93, 115, 0.09);
-}
-
-.warning {
-  background: rgba(253, 176, 34, 0.09);
-}
-
-.success {
-  background: rgba(50, 213, 131, 0.09);
-}
-
-/* -----------------------------
-   LOADING
------------------------------ */
-
-.loading {
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+  .period-selector .period-button:last-child {
+    grid-column: auto;
   }
 }
 
-/* -----------------------------
-   SMALL MOBILE
------------------------------ */
-
-@media (max-width: 359px) {
+@media (max-width: 380px) {
   main {
     padding-left: 11px;
     padding-right: 11px;
@@ -778,49 +745,25 @@ footer.bottom-nav {
 
   header,
   .app-header {
-    padding-left: 12px;
-    padding-right: 12px;
+    padding-left: 13px;
+    padding-right: 13px;
   }
 
-  .panel,
-  .filter-card,
-  .progress-card {
-    padding: 14px;
+  .period-selector {
+    gap: 6px;
   }
 
-  .payment-methods,
-  .checkbox-group,
-  .checkboxes {
-    grid-template-columns: 1fr;
-  }
-
-  header h1,
-  .app-header h1 {
-    font-size: 18px;
-  }
-}
-
-/* -----------------------------
-   TABLET / LARGE
------------------------------ */
-
-@media (min-width: 700px) {
-  main {
-    padding-top: 24px;
-  }
-
-  header,
-  .app-header {
-    padding-top: 28px;
+  .period-selector button,
+  .period-button {
+    min-height: 46px;
+    font-size: 11px;
+    padding-left: 4px;
+    padding-right: 4px;
   }
 
   .payment-methods,
   .checkbox-group,
   .checkboxes {
-    grid-template-columns: repeat(4, 1fr);
-  }
-
-  #results {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
   }
 }
