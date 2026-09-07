@@ -2414,104 +2414,38 @@ function setupTldSelector() {
 }
 
 
-function updatePeriodIndicator() {
-  let indicator =
-    $("#periodSelectionIndicator");
 
-  const buttons =
-    $all(
-      ".period-button"
-    );
+    function updatePeriodIndicator() {
+  const buttons = $all(".period-button");
+  const label = $("#activePeriodLabel");
 
-  if (
-    !buttons.length
-  ) {
+  if (!buttons.length) {
     return;
   }
 
-  let activeButton =
-    buttons.find(
-      button =>
-        button.classList.contains(
-          "active"
-        )
-    );
+  let activeButton = buttons.find(
+    button => button.classList.contains("active")
+  );
 
-  if (
-    !activeButton
-  ) {
+  if (!activeButton) {
     activeButton =
       buttons.find(
-        button =>
-          button.dataset.period ===
-          "1d"
-      ) ||
-      buttons[0];
+        button => button.dataset.period === "1d"
+      ) || buttons[0];
 
-    activeButton.classList.add(
-      "active"
-    );
+    buttons.forEach(button => {
+      button.classList.remove("active");
+    });
+
+    activeButton.classList.add("active");
   }
 
   const period =
     String(
-      activeButton.dataset.period ||
-      "1d"
+      activeButton.dataset.period || "1d"
     );
 
-  for (
-    const button
-    of buttons
-  ) {
-    const active =
-      button ===
-      activeButton;
-
-    button.setAttribute(
-      "aria-pressed",
-      active
-        ? "true"
-        : "false"
-    );
-
-    button.dataset.active =
-      active
-        ? "true"
-        : "false";
-
-    button.style.fontWeight =
-      active
-        ? "800"
-        : "500";
-
-    button.style.opacity =
-      active
-        ? "1"
-        : "0.65";
-  }
-
-  if (!indicator) {
-    indicator =
-      document.createElement(
-        "div"
-      );
-
-    indicator.id =
-      "periodSelectionIndicator";
-
-    indicator.style.marginTop =
-      "8px";
-
-    indicator.style.fontWeight =
-      "700";
-
-    indicator.style.fontSize =
-      "13px";
-
-    activeButton.parentElement?.after(
-      indicator
-    );
-  }
+  state.selectedPeriod = period;
 
   const labels = {
     "1d": "1 DAY",
@@ -2521,87 +2455,127 @@ function updatePeriodIndicator() {
     "1m": "1 MONTH"
   };
 
-  indicator.textContent =
-    `ACTIVE PERIOD: ${
-      labels[period] ||
-      period.toUpperCase()
-    }`;
+  buttons.forEach(button => {
+    const active = button === activeButton;
+
+    button.classList.toggle(
+      "active",
+      active
+    );
+
+    button.setAttribute(
+      "aria-pressed",
+      active ? "true" : "false"
+    );
+
+    button.dataset.active =
+      active ? "true" : "false";
+  });
+
+  /*
+   * IMPORTANT:
+   * Use the existing HTML label.
+   * DO NOT create another indicator.
+   */
+  if (label) {
+    label.textContent =
+      `ACTIVE PERIOD: ${
+        labels[period] || period.toUpperCase()
+      }`;
+  }
 }
 
 
 function setupPeriodButtons() {
   const buttons =
-    $all(
-      ".period-button"
-    );
+    $all(".period-button");
 
-  if (
-    !buttons.length
-  ) {
+  if (!buttons.length) {
     return;
   }
 
-  let activeFound =
-    buttons.some(
+  /*
+   * Default period = 1 Day
+   */
+  let activeButton =
+    buttons.find(
       button =>
-        button.classList.contains(
-          "active"
-        )
+        button.classList.contains("active")
     );
 
-  /*
-   * New default = 1 Day.
-   */
-  if (!activeFound) {
-    const defaultButton =
+  if (!activeButton) {
+    activeButton =
       buttons.find(
         button =>
-          button.dataset.period ===
-          "1d"
-      ) ||
-      buttons[0];
+          button.dataset.period === "1d"
+      ) || buttons[0];
 
-    defaultButton.classList.add(
-      "active"
-    );
+    activeButton.classList.add("active");
   }
 
-  for (
-    const button
-    of buttons
-  ) {
+  /*
+   * Make sure only ONE button is active.
+   */
+  buttons.forEach(button => {
+    button.classList.toggle(
+      "active",
+      button === activeButton
+    );
+
+    button.setAttribute(
+      "type",
+      "button"
+    );
+  });
+
+  /*
+   * Register click handlers.
+   */
+  buttons.forEach(button => {
     button.addEventListener(
       "click",
       () => {
-
-        for (
-          const item
-          of buttons
-        ) {
-          item.classList.remove(
-            "active"
-          );
+        if (state.scanning) {
+          return;
         }
 
-        button.classList.add(
-          "active"
+        buttons.forEach(item => {
+          item.classList.remove("active");
+          item.setAttribute(
+            "aria-pressed",
+            "false"
+          );
+          item.dataset.active = "false";
+        });
+
+        button.classList.add("active");
+
+        button.setAttribute(
+          "aria-pressed",
+          "true"
         );
+
+        button.dataset.active = "true";
 
         state.selectedPeriod =
           String(
-            button.dataset.period ||
-            "1d"
+            button.dataset.period || "1d"
           );
 
         updatePeriodIndicator();
         updateSettingsView();
       }
     );
-  }
+  });
 
+  /*
+   * Sync initial state with UI.
+   */
   readSelectedPeriod();
   updatePeriodIndicator();
 }
+        
+        
 
 
 function setupPaymentMethods() {
