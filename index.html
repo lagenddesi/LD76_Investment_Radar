@@ -5,187 +5,1142 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b0f14">
 <title>LD76 Investment Radar</title>
+
 <style>
-:root{--bg:#0b0f14;--card:#131922;--card2:#19212c;--text:#f2f5f8;--muted:#8f9baa;--accent:#4ade80;--danger:#f87171;--border:#26303c}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,sans-serif}
-button{font:inherit;color:inherit;border:0;cursor:pointer}.app{max-width:560px;min-height:100vh;margin:auto;padding-bottom:76px}
-header{height:64px;padding:10px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
-.logo{width:40px;height:40px;border-radius:12px;background:var(--accent);color:#07100a;display:grid;place-items:center;font-weight:800}.head{flex:1}.head b{display:block}.head small,.muted{color:var(--muted)}
-.icon{background:var(--card);width:40px;height:40px;border-radius:12px}
-main{padding:16px}.screen{display:none}.screen.active{display:block}
-h1{font-size:24px;margin:4px 0 6px}h2{font-size:18px;margin:0 0 12px}p{margin:6px 0;color:var(--muted)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:12px 0}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{padding:12px;background:var(--card2);border-radius:12px;text-align:center}.stat b{display:block;font-size:19px}.stat small{color:var(--muted)}
-.row{display:flex;gap:8px;align-items:center}.between{justify-content:space-between}
-.chips{display:flex;gap:8px;overflow:auto;padding-bottom:3px}.chip{padding:9px 13px;border-radius:20px;background:var(--card2);white-space:nowrap}.chip.on{background:var(--accent);color:#07100a;font-weight:700}
-.primary{width:100%;padding:14px;border-radius:13px;background:var(--accent);color:#07100a;font-weight:800;margin-top:10px}.secondary{padding:12px;border-radius:12px;background:var(--card2)}
-.progress{height:8px;background:var(--card2);border-radius:8px;overflow:hidden;margin:14px 0}.bar{height:100%;width:0;background:var(--accent);transition:.25s}
-.result{padding:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;margin:10px 0}.domain{font-weight:800;word-break:break-all}.score{color:var(--accent);font-weight:800}
-.badge{display:inline-block;padding:4px 8px;border-radius:8px;background:var(--card2);font-size:12px;margin:4px 3px 0 0}
-.item{padding:11px 0;border-bottom:1px solid var(--border)}.item:last-child{border:0}.item b{display:block}.item span{color:var(--muted);font-size:13px}
-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(560px,100%);height:68px;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:10}
-nav button{flex:1;background:none;color:var(--muted);font-size:12px}nav button.on{color:var(--accent);font-weight:700}
-.toggle{width:46px;height:26px;border-radius:20px;background:var(--card2);padding:3px}.toggle i{display:block;width:20px;height:20px;border-radius:50%;background:var(--muted);transition:.2s}.toggle.on{background:var(--accent)}.toggle.on i{background:#07100a;transform:translateX(20px)}
-.back{background:none;padding:0 0 12px;color:var(--accent)}
-.empty{text-align:center;padding:35px 10px;color:var(--muted)}
+:root{
+ --bg:#0b0f14;
+ --card:#131922;
+ --card2:#19212c;
+ --text:#f2f5f8;
+ --muted:#8f9baa;
+ --accent:#4ade80;
+ --danger:#f87171;
+ --border:#26303c
+}
+
+*{box-sizing:border-box}
+
+body{
+ margin:0;
+ background:var(--bg);
+ color:var(--text);
+ font:15px system-ui,-apple-system,sans-serif
+}
+
+button{
+ font:inherit;
+ color:inherit;
+ border:0;
+ cursor:pointer
+}
+
+.app{
+ max-width:560px;
+ min-height:100vh;
+ margin:auto;
+ padding-bottom:76px
+}
+
+header{
+ height:64px;
+ padding:10px 16px;
+ display:flex;
+ align-items:center;
+ gap:12px;
+ border-bottom:1px solid var(--border);
+ position:sticky;
+ top:0;
+ background:var(--bg);
+ z-index:5
+}
+
+.logo{
+ width:40px;
+ height:40px;
+ border-radius:12px;
+ background:var(--accent);
+ color:#07100a;
+ display:grid;
+ place-items:center;
+ font-weight:800
+}
+
+.head{flex:1}
+.head b{display:block}
+.head small,.muted{color:var(--muted)}
+
+.icon{
+ background:var(--card);
+ width:40px;
+ height:40px;
+ border-radius:12px
+}
+
+main{padding:16px}
+
+.screen{display:none}
+.screen.active{display:block}
+
+h1{
+ font-size:24px;
+ margin:4px 0 6px
+}
+
+h2{
+ font-size:18px;
+ margin:0 0 12px
+}
+
+p{
+ margin:6px 0;
+ color:var(--muted)
+}
+
+.card{
+ background:var(--card);
+ border:1px solid var(--border);
+ border-radius:16px;
+ padding:16px;
+ margin:12px 0
+}
+
+.grid{
+ display:grid;
+ grid-template-columns:repeat(3,1fr);
+ gap:8px
+}
+
+.stat{
+ padding:12px;
+ background:var(--card2);
+ border-radius:12px;
+ text-align:center
+}
+
+.stat b{
+ display:block;
+ font-size:19px
+}
+
+.stat small{color:var(--muted)}
+
+.row{
+ display:flex;
+ gap:8px;
+ align-items:center
+}
+
+.between{justify-content:space-between}
+
+.chips{
+ display:flex;
+ gap:8px;
+ overflow:auto;
+ padding-bottom:3px
+}
+
+.chip{
+ padding:9px 13px;
+ border-radius:20px;
+ background:var(--card2);
+ white-space:nowrap
+}
+
+.chip.on{
+ background:var(--accent);
+ color:#07100a;
+ font-weight:700
+}
+
+.primary{
+ width:100%;
+ padding:14px;
+ border-radius:13px;
+ background:var(--accent);
+ color:#07100a;
+ font-weight:800;
+ margin-top:10px
+}
+
+.secondary{
+ padding:12px;
+ border-radius:12px;
+ background:var(--card2)
+}
+
+.progress{
+ height:8px;
+ background:var(--card2);
+ border-radius:8px;
+ overflow:hidden;
+ margin:14px 0
+}
+
+.bar{
+ height:100%;
+ width:0;
+ background:var(--accent);
+ transition:.25s
+}
+
+.result{
+ padding:14px;
+ background:var(--card);
+ border:1px solid var(--border);
+ border-radius:14px;
+ margin:10px 0
+}
+
+.domain{
+ font-weight:800;
+ word-break:break-all
+}
+
+.score{
+ color:var(--accent);
+ font-weight:800
+}
+
+.badge{
+ display:inline-block;
+ padding:4px 8px;
+ border-radius:8px;
+ background:var(--card2);
+ font-size:12px;
+ margin:4px 3px 0 0
+}
+
+.item{
+ padding:11px 0;
+ border-bottom:1px solid var(--border)
+}
+
+.item:last-child{border:0}
+
+.item b{display:block}
+
+.item span{
+ color:var(--muted);
+ font-size:13px
+}
+
+nav{
+ position:fixed;
+ bottom:0;
+ left:50%;
+ transform:translateX(-50%);
+ width:min(560px,100%);
+ height:68px;
+ background:var(--card);
+ border-top:1px solid var(--border);
+ display:flex;
+ z-index:10
+}
+
+nav button{
+ flex:1;
+ background:none;
+ color:var(--muted);
+ font-size:12px
+}
+
+nav button.on{
+ color:var(--accent);
+ font-weight:700
+}
+
+.toggle{
+ width:46px;
+ height:26px;
+ border-radius:20px;
+ background:var(--card2);
+ padding:3px
+}
+
+.toggle i{
+ display:block;
+ width:20px;
+ height:20px;
+ border-radius:50%;
+ background:var(--muted);
+ transition:.2s
+}
+
+.toggle.on{background:var(--accent)}
+
+.toggle.on i{
+ background:#07100a;
+ transform:translateX(20px)
+}
+
+.back{
+ background:none;
+ padding:0 0 12px;
+ color:var(--accent)
+}
+
+.empty{
+ text-align:center;
+ padding:35px 10px;
+ color:var(--muted)
+}
+
+.loading{
+ text-align:center;
+ padding:30px 10px;
+ color:var(--muted)
+}
+
+.error{
+ color:var(--danger);
+ text-align:center;
+ padding:20px 10px
+}
+
 @media(prefers-color-scheme:light){
-body.light{--bg:#f4f6f8;--card:#fff;--card2:#edf1f4;--text:#111827;--muted:#65717f;--border:#d9e0e7}
+ body.light{
+  --bg:#f4f6f8;
+  --card:#fff;
+  --card2:#edf1f4;
+  --text:#111827;
+  --muted:#65717f;
+  --border:#d9e0e7
+ }
 }
 </style>
 </head>
+
 <body>
+
 <div class="app">
+
 <header>
-<div class="logo">LD</div><div class="head"><b>Investment Radar</b><small>LD76 Domain Discovery</small></div>
+<div class="logo">LD</div>
+
+<div class="head">
+<b>Investment Radar</b>
+<small>LD76 Domain Discovery</small>
+</div>
+
 <button class="icon" onclick="notify()">🔔</button>
 </header>
 
 <main>
+
 <section id="home" class="screen active">
-<h1>Find New Investment Domains</h1><p>Discover newly appearing domains and detect real investment platforms.</p>
 
-<div class="card"><h2>Scan Period</h2><div class="chips">
-<button class="chip on" data-period="1" onclick="period(1)">1 Day</button>
-<button class="chip" data-period="3" onclick="period(3)">3 Days</button>
-<button class="chip" data-period="7" onclick="period(7)">7 Days</button>
-</div></div>
+<h1>Find New Investment Domains</h1>
 
-<div class="card"><h2>TLD</h2><div class="chips">
-<button class="chip on" data-tld="all" onclick="tld('all')">All</button>
-<button class="chip" data-tld="com" onclick="tld('com')">.com</button>
-<button class="chip" data-tld="net" onclick="tld('net')">.net</button>
-<button class="chip" data-tld="org" onclick="tld('org')">.org</button>
-<button class="chip" data-tld="info" onclick="tld('info')">.info</button>
-</div></div>
+<p>
+Discover newly appearing domains and detect real investment platforms.
+</p>
 
-<button class="primary" onclick="startScan()">START SCAN</button>
+<div class="card">
+
+<h2>Scan Period</h2>
+
+<div class="chips">
+
+<button class="chip on"
+ data-period="1"
+ onclick="period(1)">
+1 Day
+</button>
+
+<button class="chip"
+ data-period="3"
+ onclick="period(3)">
+3 Days
+</button>
+
+<button class="chip"
+ data-period="7"
+ onclick="period(7)">
+7 Days
+</button>
+
+</div>
+</div>
+
+<div class="card">
+
+<h2>TLD</h2>
+
+<div class="chips">
+
+<button class="chip on"
+ data-tld="all"
+ onclick="tld('all')">
+All
+</button>
+
+<button class="chip"
+ data-tld="com"
+ onclick="tld('com')">
+.com
+</button>
+
+<button class="chip"
+ data-tld="net"
+ onclick="tld('net')">
+.net
+</button>
+
+<button class="chip"
+ data-tld="org"
+ onclick="tld('org')">
+.org
+</button>
+
+<button class="chip"
+ data-tld="info"
+ onclick="tld('info')">
+.info
+</button>
+
+</div>
+</div>
+
+<button class="primary"
+ onclick="startScan()">
+START SCAN
+</button>
 
 <div class="grid card">
-<div class="stat"><b id="domains">0</b><small>Domains</small></div>
-<div class="stat"><b id="checked">0</b><small>Checked</small></div>
-<div class="stat"><b id="found">0</b><small>Found</small></div>
+
+<div class="stat">
+<b id="domains">0</b>
+<small>Domains</small>
 </div>
+
+<div class="stat">
+<b id="checked">0</b>
+<small>Checked</small>
+</div>
+
+<div class="stat">
+<b id="found">0</b>
+<small>Found</small>
+</div>
+
+</div>
+
 </section>
+
 
 <section id="scan" class="screen">
-<h1>Scanning</h1><p id="scanStatus">Preparing scanner...</p>
-<div class="card"><div class="progress"><div class="bar" id="bar"></div></div>
-<div class="grid"><div class="stat"><b id="sDomains">0</b><small>Domains</small></div><div class="stat"><b id="sChecked">0</b><small>Checked</small></div><div class="stat"><b id="sFound">0</b><small>Found</small></div></div></div>
-<button class="secondary" onclick="show('results')">View Results</button>
+
+<h1>Scanning</h1>
+
+<p id="scanStatus">
+Preparing scanner...
+</p>
+
+<div class="card">
+
+<div class="progress">
+<div class="bar" id="bar"></div>
+</div>
+
+<div class="grid">
+
+<div class="stat">
+<b id="sDomains">0</b>
+<small>Domains</small>
+</div>
+
+<div class="stat">
+<b id="sChecked">0</b>
+<small>Checked</small>
+</div>
+
+<div class="stat">
+<b id="sFound">0</b>
+<small>Found</small>
+</div>
+
+</div>
+
+</div>
+
+<button class="secondary"
+ onclick="show('results')">
+View Results
+</button>
+
 </section>
+
 
 <section id="results" class="screen">
-<h1>Investment Results</h1><p id="resultInfo">No scan completed.</p><div id="resultsList"><div class="empty">Start a scan to see results.</div></div>
+
+<h1>Investment Results</h1>
+
+<p id="resultInfo">
+No scan completed.
+</p>
+
+<div id="resultsList">
+<div class="empty">
+Start a scan to see results.
+</div>
+</div>
+
 </section>
+
 
 <section id="details" class="screen">
-<button class="back" onclick="show('results')">← Results</button>
+
+<button class="back"
+ onclick="show('results')">
+← Results
+</button>
+
 <div id="detail"></div>
+
 </section>
+
 
 <section id="settings" class="screen">
+
 <h1>Settings</h1>
-<div class="card"><div class="row between"><div><b>Dark Theme</b><p>Use dark app appearance</p></div><button class="toggle on" id="themeToggle" onclick="theme()"><i></i></button></div></div>
-<div class="card"><h2>Scanner</h2>
-<div class="item"><b>Discovery</b><span>Smet Newly Registered Domains</span></div>
-<div class="item"><b>Verification</b><span>RDAP / WHOIS</span></div>
-<div class="item"><b>Detection</b><span>Content, actions, payment, account and referral signals</span></div>
-<div class="item"><b>False Positives</b><span>Domain parking, marketplaces, articles and generic pages are filtered.</span></div>
+
+<div class="card">
+
+<div class="row between">
+
+<div>
+<b>Dark Theme</b>
+<p>Use dark app appearance</p>
 </div>
+
+<button class="toggle on"
+ id="themeToggle"
+ onclick="theme()">
+<i></i>
+</button>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<h2>Scanner</h2>
+
+<div class="item">
+<b>Discovery</b>
+<span>Smet Newly Registered Domains</span>
+</div>
+
+<div class="item">
+<b>Verification</b>
+<span>RDAP / WHOIS</span>
+</div>
+
+<div class="item">
+<b>Detection</b>
+<span>
+Content, actions, payment, account and referral signals
+</span>
+</div>
+
+<div class="item">
+<b>Scan Limit</b>
+<span>
+Maximum 500 domains per scan
+</span>
+</div>
+
+<div class="item">
+<b>False Positives</b>
+<span>
+Domain parking, marketplaces, articles and generic pages are filtered.
+</span>
+</div>
+
+</div>
+
 </section>
+
 </main>
 
+
 <nav>
-<button class="on" data-screen="home" onclick="show('home')">⌂<br>Home</button>
-<button data-screen="scan" onclick="show('scan')">⌕<br>Scan</button>
-<button data-screen="results" onclick="show('results')">▣<br>Results</button>
-<button data-screen="settings" onclick="show('settings')">⚙<br>Settings</button>
+
+<button class="on"
+ data-screen="home"
+ onclick="show('home')">
+⌂<br>Home
+</button>
+
+<button
+ data-screen="scan"
+ onclick="show('scan')">
+⌕<br>Scan
+</button>
+
+<button
+ data-screen="results"
+ onclick="show('results')">
+▣<br>Results
+</button>
+
+<button
+ data-screen="settings"
+ onclick="show('settings')">
+⚙<br>Settings
+</button>
+
 </nav>
+
 </div>
 
+
 <script>
-const state={period:1,tld:"all",scanning:false,results:[],timer:null};
+
+const state = {
+ period: 1,
+ tld: "all",
+ scanning: false,
+ results: []
+};
+
 
 function show(id){
- document.querySelectorAll(".screen").forEach(x=>x.classList.toggle("active",x.id===id));
- document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x.dataset.screen===id));
- if(id==="results")renderResults();
-}
-function period(v){state.period=v;document.querySelectorAll("[data-period]").forEach(x=>x.classList.toggle("on",+x.dataset.period===v))}
-function tld(v){state.tld=v;document.querySelectorAll("[data-tld]").forEach(x=>x.classList.toggle("on",x.dataset.tld===v))}
-function notify(){alert("Notifications will be connected later.")}
 
-async function startScan(){
- if(state.scanning)return;
- state.scanning=true;state.results=[];show("scan");
- setProgress(0,0,0,"Starting scan...");
- try{
-  const r=await fetch("/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({period:state.period,tld:state.tld})});
-  if(!r.ok)throw Error("API unavailable");
-  const data=await r.json(),id=data.scan_id;
-  poll(id);
- }catch(e){
-  state.scanning=false;setProgress(0,0,0,"Scanner API is not connected yet.");
+ document
+ .querySelectorAll(".screen")
+ .forEach(
+  element =>
+   element.classList.toggle(
+    "active",
+    element.id === id
+   )
+ );
+
+ document
+ .querySelectorAll("nav button")
+ .forEach(
+  element =>
+   element.classList.toggle(
+    "on",
+    element.dataset.screen === id
+   )
+ );
+
+ if(id === "results"){
+  renderResults();
  }
 }
 
-async function poll(id){
- try{
-  const r=await fetch("/api/scan/"+encodeURIComponent(id)+"/results");
-  if(!r.ok)throw Error();
-  const d=await r.json();
-  const p=Math.max(0,Math.min(100,d.progress||0));
-  setProgress(p,d.checked||0,d.found||0,d.status||"Scanning...");
-  if(d.results)state.results=d.results;
-  if(d.status==="completed"||d.done){state.scanning=false;renderResults();show("results");return}
- }catch(e){setProgress(0,0,0,"Waiting for scanner...")}
- state.timer=setTimeout(()=>poll(id),2000);
+
+function period(value){
+
+ state.period = value;
+
+ document
+ .querySelectorAll("[data-period]")
+ .forEach(
+  element =>
+   element.classList.toggle(
+    "on",
+    Number(element.dataset.period) === value
+   )
+ );
 }
 
-function setProgress(p,checked,found,status){
- document.getElementById("bar").style.width=p+"%";
- document.getElementById("scanStatus").textContent=status;
- ["domains","sDomains"].forEach(id=>document.getElementById(id).textContent=state.results.length||0);
- ["checked","sChecked"].forEach(id=>document.getElementById(id).textContent=checked);
- ["found","sFound"].forEach(id=>document.getElementById(id).textContent=found);
+
+function tld(value){
+
+ state.tld = value;
+
+ document
+ .querySelectorAll("[data-tld]")
+ .forEach(
+  element =>
+   element.classList.toggle(
+    "on",
+    element.dataset.tld === value
+   )
+ );
 }
+
+
+function notify(){
+
+ alert(
+  "Notifications will be connected later."
+ );
+}
+
+
+async function startScan(){
+
+ if(state.scanning){
+  return;
+ }
+
+ state.scanning = true;
+ state.results = [];
+
+ show("scan");
+
+ setProgress(
+  5,
+  0,
+  0,
+  "Downloading newly registered domains..."
+ );
+
+ try{
+
+  const response = await fetch(
+   "/api/scan",
+   {
+    method: "POST",
+    headers: {
+     "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+     period: state.period,
+     tld: state.tld
+    })
+   }
+  );
+
+  if(!response.ok){
+   throw new Error(
+    "HTTP " + response.status
+   );
+  }
+
+  setProgress(
+   15,
+   0,
+   0,
+   "Scanning domains..."
+  );
+
+  const data =
+   await response.json();
+
+  state.results =
+   Array.isArray(data.results)
+    ? data.results
+    : [];
+
+  setProgress(
+   100,
+   data.checked || 0,
+   data.found || 0,
+   data.message ||
+    "Scan completed."
+  );
+
+  state.scanning = false;
+
+  renderResults();
+
+  show("results");
+
+ }
+ catch(error){
+
+  console.error(error);
+
+  state.scanning = false;
+
+  setProgress(
+   0,
+   0,
+   0,
+   "Scanner API error."
+  );
+
+  document.getElementById(
+   "resultsList"
+  ).innerHTML =
+   '<div class="error">' +
+   'Scanner could not complete the request.' +
+   '</div>';
+ }
+}
+
+
+function setProgress(
+ percent,
+ checked,
+ found,
+ status
+){
+
+ document.getElementById(
+  "bar"
+ ).style.width =
+  percent + "%";
+
+ document.getElementById(
+  "scanStatus"
+ ).textContent =
+  status;
+
+ document.getElementById(
+  "domains"
+ ).textContent =
+  checked;
+
+ document.getElementById(
+  "checked"
+ ).textContent =
+  checked;
+
+ document.getElementById(
+  "found"
+ ).textContent =
+  found;
+
+ document.getElementById(
+  "sDomains"
+ ).textContent =
+  checked;
+
+ document.getElementById(
+  "sChecked"
+ ).textContent =
+  checked;
+
+ document.getElementById(
+  "sFound"
+ ).textContent =
+  found;
+}
+
 
 function renderResults(){
- const box=document.getElementById("resultsList");
- document.getElementById("resultInfo").textContent=state.results.length+" investment domains found.";
- if(!state.results.length){box.innerHTML='<div class="empty">No matching investment domains found.</div>';return}
- box.innerHTML=state.results.map((x,i)=>`<div class="result" onclick="details(${i})">
- <div class="row between"><span class="domain">${esc(x.domain||"Unknown")}</span><span class="score">${x.score??"-"}</span></div>
- <p>${esc(x.site_name||"Unknown site")}</p>
- <span class="badge">First Seen: ${esc(x.first_seen||"Unavailable")}</span>
- <span class="badge">Registration: ${esc(x.registration_date||"Unavailable")}</span>
- </div>`).join("");
+
+ const box =
+  document.getElementById(
+   "resultsList"
+  );
+
+ document.getElementById(
+  "resultInfo"
+ ).textContent =
+  state.results.length +
+  " investment domains found.";
+
+ if(!state.results.length){
+
+  box.innerHTML =
+   '<div class="empty">' +
+   'No matching investment domains found.' +
+   '</div>';
+
+  return;
+ }
+
+ box.innerHTML =
+  state.results
+   .map(
+    (item, index) =>
+
+     `<div class="result"
+      onclick="details(${index})">
+
+      <div class="row between">
+
+       <span class="domain">
+        ${esc(item.domain || "Unknown")}
+       </span>
+
+       <span class="score">
+        ${item.score ?? "-"}
+       </span>
+
+      </div>
+
+      <p>
+       ${esc(item.site_name || "Unknown site")}
+      </p>
+
+      <span class="badge">
+       Score: ${item.score ?? "-"}
+      </span>
+
+      <span class="badge">
+       ${esc(item.category || "Investment")}
+      </span>
+
+      <span class="badge">
+       Confidence:
+       ${esc(item.confidence || "Unknown")}
+      </span>
+
+     </div>`
+   )
+   .join("");
 }
 
-function details(i){
- const x=state.results[i];
- document.getElementById("detail").innerHTML=`<h1>${esc(x.site_name||"Domain Details")}</h1>
- <div class="card"><div class="domain">${esc(x.domain)}</div><p>${esc(x.category||"Investment")}</p>
- <span class="badge">Score: ${x.score??"-"}</span><span class="badge">Confidence: ${esc(x.confidence||"Unknown")}</span></div>
- <div class="card"><h2>Domain Information</h2>
- ${item("First Seen",x.first_seen)}${item("Registration Date",x.registration_date)}${item("Registrar",x.registrar)}${item("Expiry",x.expiry)}${item("Status",x.status)}${item("Nameservers",x.nameservers)}</div>
- <div class="card"><h2>Evidence</h2>${(x.evidence||[]).map(e=>`<div class="item">${esc(e)}</div>`).join("")||"<p>No evidence supplied.</p>"}
- </div><div class="row"><button class="primary" onclick="openSite('${escAttr(x.domain)}')">OPEN WEBSITE</button><button class="secondary" onclick="rdap('${escAttr(x.domain)}')">RDAP</button></div>`;
+
+function details(index){
+
+ const item =
+  state.results[index];
+
+ if(!item){
+  return;
+ }
+
+ document.getElementById(
+  "detail"
+ ).innerHTML =
+
+ `<h1>
+   ${esc(
+    item.site_name ||
+    "Domain Details"
+   )}
+  </h1>
+
+  <div class="card">
+
+   <div class="domain">
+    ${esc(item.domain)}
+   </div>
+
+   <p>
+    ${esc(
+     item.category ||
+     "Investment"
+    )}
+   </p>
+
+   <span class="badge">
+    Score: ${item.score ?? "-"}
+   </span>
+
+   <span class="badge">
+    Confidence:
+    ${esc(
+     item.confidence ||
+     "Unknown"
+    )}
+   </span>
+
+  </div>
+
+  <div class="card">
+
+   <h2>Domain Information</h2>
+
+   ${itemRow(
+    "Domain",
+    item.domain
+   )}
+
+   ${itemRow(
+    "Website",
+    item.url
+   )}
+
+   ${itemRow(
+    "Registration Date",
+    item.registration_date
+   )}
+
+   ${itemRow(
+    "Registrar",
+    item.registrar
+   )}
+
+   ${itemRow(
+    "Expiry",
+    item.expiry
+   )}
+
+   ${itemRow(
+    "Status",
+    item.status
+   )}
+
+   ${itemRow(
+    "Nameservers",
+    item.nameservers
+   )}
+
+  </div>
+
+  <div class="card">
+
+   <h2>Evidence</h2>
+
+   ${
+    (item.evidence || [])
+     .map(
+      evidence =>
+       `<div class="item">
+        ${esc(evidence)}
+       </div>`
+     )
+     .join("")
+    ||
+    "<p>No evidence supplied.</p>"
+   }
+
+  </div>
+
+  <div class="row">
+
+   <button
+    class="primary"
+    onclick="openSite('${escAttr(item.domain)}')">
+    OPEN WEBSITE
+   </button>
+
+   <button
+    class="secondary"
+    onclick="rdap('${escAttr(item.domain)}')">
+    RDAP
+   </button>
+
+  </div>`;
+
  show("details");
 }
-function item(a,b){return `<div class="item"><b>${a}</b><span>${esc(b||"Unavailable")}</span></div>`}
-function openSite(d){location.href="https://"+d}
-async function rdap(d){
- try{const r=await fetch("/api/rdap?domain="+encodeURIComponent(d));const x=await r.json();alert(JSON.stringify(x,null,2))}
- catch(e){alert("RDAP unavailable")}
+
+
+function itemRow(
+ label,
+ value
+){
+
+ return `
+ <div class="item">
+  <b>${esc(label)}</b>
+  <span>
+   ${esc(
+    Array.isArray(value)
+     ? value.join(", ")
+     : value ||
+       "Unavailable"
+   )}
+  </span>
+ </div>`;
 }
+
+
+function openSite(domain){
+
+ location.href =
+  "https://" + domain;
+}
+
+
+async function rdap(domain){
+
+ try{
+
+  const response =
+   await fetch(
+    "/api/rdap?domain=" +
+    encodeURIComponent(domain)
+   );
+
+  const data =
+   await response.json();
+
+  alert(
+   JSON.stringify(
+    data,
+    null,
+    2
+   )
+  );
+
+ }
+ catch(error){
+
+  alert(
+   "RDAP unavailable"
+  );
+ }
+}
+
+
 function theme(){
- const b=document.body,t=document.getElementById("themeToggle"),on=b.classList.toggle("light");
- t.classList.toggle("on",!on);localStorage.theme=on?"light":"dark";
+
+ const body =
+  document.body;
+
+ const toggle =
+  document.getElementById(
+   "themeToggle"
+  );
+
+ const light =
+  body.classList.toggle(
+   "light"
+  );
+
+ toggle.classList.toggle(
+  "on",
+  !light
+ );
+
+ localStorage.theme =
+  light
+   ? "light"
+   : "dark";
 }
-if(localStorage.theme==="light"){document.body.classList.add("light");document.getElementById("themeToggle").classList.remove("on")}
-function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function escAttr(v){return esc(v).replace(/`/g,"&#96;")}
+
+
+if(
+ localStorage.theme === "light"
+){
+
+ document.body.classList.add(
+  "light"
+ );
+
+ document
+  .getElementById(
+   "themeToggle"
+  )
+  .classList.remove(
+   "on"
+  );
+}
+
+
+function esc(value){
+
+ return String(
+  value ?? ""
+ )
+ .replace(
+  /[&<>"']/g,
+  character =>
+   ({
+    "&":"&amp;",
+    "<":"&lt;",
+    ">":"&gt;",
+    '"':"&quot;",
+    "'":"&#39;"
+   })[character]
+ );
+}
+
+
+function escAttr(value){
+
+ return esc(value)
+  .replace(
+   /`/g,
+   "&#96;"
+  );
+}
+
 </script>
+
 </body>
 </html>
