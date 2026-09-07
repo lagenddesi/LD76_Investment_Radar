@@ -95,7 +95,7 @@ function normalizeTld(value) {
     tld = "." + tld;
   }
 
-  if (!/^\\.[a-z0-9-]{2,63}$/.test(tld)) {
+  if (!/^\.[a-z0-9-]{2,63}$/.test(tld)) {
     return null;
   }
 
