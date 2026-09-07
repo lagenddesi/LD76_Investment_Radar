@@ -27,7 +27,7 @@ def _fetch(url):
 
     with urllib.request.urlopen(
         request,
-        timeout=600,
+        timeout=120,
     ) as response:
         return response.read().decode(
             "utf-8",
