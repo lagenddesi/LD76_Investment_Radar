@@ -1,36 +1,56 @@
+
 "use strict";
 
 /*
  * LD76 INVESTMENT RADAR
  *
- * WEBSITE SCANNER
+ * FINAL WEBSITE SCANNER
  *
- * PURPOSE:
- * Detect websites that are relevant to:
+ * PURPOSE
+ * -------
+ * Find newly registered websites that appear to offer
+ * REAL financial activity such as:
  *
  * - Investment
- * - Crypto
+ * - Investment plans
  * - Trading
  * - Forex
+ * - Crypto investment / trading
  * - Staking
  * - Mining
- * - Profit
- * - ROI
- * - Earning
- * - Income
- * - Deposit / Withdrawal
- * - Referral / Affiliate earning
+ * - Deposit / withdrawal based earning
+ * - Profit / ROI programs
+ * - Passive income programs
+ * - Referral earning connected to a financial platform
  *
- * IMPORTANT:
+ * IMPORTANT
+ * ---------
+ * Payment methods are EVIDENCE ONLY.
  *
- * PAYMENT METHODS ARE NOT REQUIRED.
+ * Bank / Easypaisa / JazzCash / Crypto are NOT required
+ * for a website to become a candidate.
  *
- * Bank / Easypaisa / JazzCash / Crypto are
- * evidence only. A website can become a
- * candidate even when no payment method is found.
+ * A generic word such as:
+ * "crypto"
+ * "bank"
+ * "return"
+ * "profit"
+ * "bonus"
+ *
+ * does NOT make a website an investment candidate.
+ *
+ * The scanner requires FINANCIAL CONTEXT.
+ *
+ * Parking / domain-for-sale / marketplace / registrar
+ * holding pages are HARD REJECTED before Gemini.
  *
  * NO ARTIFICIAL CANDIDATE LIMIT.
  */
+
+
+/* =========================================================
+ * CONFIGURATION
+ * ========================================================= */
 
 const CONCURRENCY = 25;
 
@@ -44,163 +64,193 @@ const MAX_DEEP_PAGES = 10;
 
 
 /* =========================================================
- * PRIMARY INVESTMENT / FINANCIAL SIGNALS
+ * FINANCIAL SIGNAL GROUPS
  * ========================================================= */
 
-const INVESTMENT_PATTERNS = [
+const SIGNAL_PATTERNS = {
 
-  /* Investment */
-  /\binvest\b/i,
-  /\binvestment\b/i,
-  /\binvesting\b/i,
-  /\binvestor\b/i,
-  /\binvestors\b/i,
-  /\binvestment\s+plan\b/i,
-  /\binvestment\s+plans\b/i,
-  /\binvestment\s+program\b/i,
-  /\binvestment\s+programs\b/i,
-  /\binvestment\s+opportunity\b/i,
-  /\binvestment\s+opportunities\b/i,
+  investment: [
+    /\binvest\b/i,
+    /\binvestment\b/i,
+    /\binvesting\b/i,
+    /\binvestor\b/i,
+    /\binvestors\b/i,
+    /\binvestment\s+plan\b/i,
+    /\binvestment\s+plans\b/i,
+    /\binvestment\s+program\b/i,
+    /\binvestment\s+programs\b/i,
+    /\binvestment\s+opportunity\b/i,
+    /\binvestment\s+opportunities\b/i,
+    /\binvestment\s+package\b/i,
+    /\binvestment\s+packages\b/i,
+    /\binvestment\s+account\b/i,
+    /\binvestment\s+fund\b/i,
+    /\binvestment\s+funds\b/i,
+    /\binvestment\s+platform\b/i
+  ],
 
-  /* Profit */
-  /\bprofit\b/i,
-  /\bprofits\b/i,
-  /\bprofit\s+plan\b/i,
-  /\bprofit\s+plans\b/i,
-  /\bprofit\s+rate\b/i,
-  /\bprofit\s+sharing\b/i,
+  deposit: [
+    /\bdeposit\b/i,
+    /\bdeposits\b/i,
+    /\bdeposit\s+funds?\b/i,
+    /\bdeposit\s+money\b/i,
+    /\bminimum\s+deposit\b/i,
+    /\bdeposit\s+amount\b/i,
+    /\badd\s+funds?\b/i,
+    /\bfund\s+your\s+account\b/i,
+    /\bfunding\s+account\b/i
+  ],
 
-  /* ROI / Returns */
-  /\broi\b/i,
-  /\breturn\s+on\s+investment\b/i,
-  /\breturn\s+rate\b/i,
-  /\breturns?\b/i,
-  /\bpercentage\s+return\b/i,
+  profit: [
+    /\bprofit\b/i,
+    /\bprofits\b/i,
+    /\bprofit\s+plan\b/i,
+    /\bprofit\s+plans\b/i,
+    /\bprofit\s+rate\b/i,
+    /\bprofit\s+sharing\b/i,
+    /\bprofit\s+percentage\b/i,
+    /\bprofit\s+return\b/i
+  ],
 
-  /* Earnings */
-  /\bearn\b/i,
-  /\bearning\b/i,
-  /\bearnings\b/i,
-  /\bearning\s+plan\b/i,
-  /\bearning\s+plans\b/i,
-  /\bearning\s+program\b/i,
-  /\bmake\s+money\b/i,
-  /\bmake\s+income\b/i,
+  return: [
+    /\breturn\s+on\s+investment\b/i,
+    /\breturn\s+rate\b/i,
+    /\breturns?\b/i,
+    /\bpercentage\s+return\b/i,
+    /\bexpected\s+return\b/i
+  ],
 
-  /* Income */
-  /\bincome\b/i,
-  /\bpassive\s+income\b/i,
-  /\bpassive\s+earning\b/i,
-  /\bpassive\s+earnings\b/i,
-  /\bpassive\s+income\s+stream\b/i,
+  roi: [
+    /\broi\b/i,
+    /\breturn\s+on\s+investment\b/i,
+    /\broi\s+percentage\b/i
+  ],
 
-  /* Deposit / withdrawal */
-  /\bdeposit\b/i,
-  /\bdeposits\b/i,
-  /\bdeposit\s+funds?\b/i,
-  /\bdeposit\s+money\b/i,
-  /\bwithdraw\b/i,
-  /\bwithdrawal\b/i,
-  /\bwithdrawals\b/i,
-  /\bwithdraw\s+funds?\b/i,
+  earning: [
+    /\bearn\b/i,
+    /\bearning\b/i,
+    /\bearnings\b/i,
+    /\bearning\s+plan\b/i,
+    /\bearning\s+plans\b/i,
+    /\bearning\s+program\b/i,
+    /\bmake\s+money\b/i,
+    /\bmake\s+income\b/i,
+    /\bpassive\s+income\b/i,
+    /\bpassive\s+earning\b/i,
+    /\bpassive\s+earnings\b/i,
+    /\bincome\s+plan\b/i,
+    /\bincome\s+program\b/i,
+    /\bdaily\s+earning\b/i,
+    /\bdaily\s+earnings\b/i
+  ],
 
-  /* Trading */
-  /\btrade\b/i,
-  /\btrading\b/i,
-  /\btrader\b/i,
-  /\btraders\b/i,
-  /\btrading\s+platform\b/i,
-  /\btrading\s+account\b/i,
-  /\btrading\s+signals?\b/i,
-  /\bcopy\s+trading\b/i,
-  /\bautomated\s+trading\b/i,
+  withdrawal: [
+    /\bwithdraw\b/i,
+    /\bwithdrawal\b/i,
+    /\bwithdrawals\b/i,
+    /\bwithdraw\s+funds?\b/i,
+    /\bwithdraw\s+profit\b/i,
+    /\bwithdraw\s+earnings?\b/i
+  ],
 
-  /* Forex */
-  /\bforex\b/i,
-  /\bforex\s+trading\b/i,
-  /\bforex\s+broker\b/i,
-  /\bforex\s+signals?\b/i,
+  trading: [
+    /\btrading\b/i,
+    /\btrader\b/i,
+    /\btraders\b/i,
+    /\btrading\s+platform\b/i,
+    /\btrading\s+account\b/i,
+    /\btrading\s+signals?\b/i,
+    /\bcopy\s+trading\b/i,
+    /\bautomated\s+trading\b/i,
+    /\btrade\s+account\b/i
+  ],
 
-  /* Crypto */
-  /\bcrypto\b/i,
-  /\bcryptocurrency\b/i,
-  /\bcrypto\s+investment\b/i,
-  /\bcrypto\s+investing\b/i,
-  /\bcrypto\s+trading\b/i,
-  /\bcrypto\s+earning\b/i,
-  /\bcrypto\s+staking\b/i,
+  forex: [
+    /\bforex\b/i,
+    /\bforex\s+trading\b/i,
+    /\bforex\s+broker\b/i,
+    /\bforex\s+signals?\b/i,
+    /\bcurrency\s+trading\b/i
+  ],
 
-  /* Bitcoin / coins */
-  /\bbitcoin\b/i,
-  /\bbtc\b/i,
-  /\bethereum\b/i,
-  /\beth\b/i,
-  /\busdt\b/i,
-  /\busdc\b/i,
-  /\baltcoin\b/i,
-  /\baltcoins\b/i,
-  /\bcoin\b/i,
-  /\btoken\b/i,
-  /\btokens\b/i,
+  crypto: [
+    /\bcrypto\b/i,
+    /\bcryptocurrency\b/i,
+    /\bbitcoin\b/i,
+    /\bbtc\b/i,
+    /\bethereum\b/i,
+    /\busdt\b/i,
+    /\busdc\b/i,
+    /\bdefi\b/i,
+    /\bcrypto\s+investment\b/i,
+    /\bcrypto\s+investing\b/i,
+    /\bcrypto\s+trading\b/i,
+    /\bcrypto\s+earning\b/i,
+    /\bcrypto\s+staking\b/i
+  ],
 
-  /* DeFi */
-  /\bdefi\b/i,
-  /\bdecentralized\s+finance\b/i,
-  /\bliquidity\s+pool\b/i,
-  /\bliquidity\s+mining\b/i,
+  staking: [
+    /\bstaking\b/i,
+    /\bstaking\s+rewards?\b/i,
+    /\bstaking\s+income\b/i,
+    /\bstaking\s+profit\b/i,
+    /\bstake\s+and\s+earn\b/i,
+    /\bapy\b/i
+  ],
 
-  /* Staking */
-  /\bstake\b/i,
-  /\bstaking\b/i,
-  /\bstaking\s+rewards?\b/i,
-  /\bstaking\s+income\b/i,
-  /\bstaking\s+profit\b/i,
+  mining: [
+    /\bmining\b/i,
+    /\bcrypto\s+mining\b/i,
+    /\bbitcoin\s+mining\b/i,
+    /\bcloud\s+mining\b/i,
+    /\bmining\s+profit\b/i,
+    /\bmining\s+rewards?\b/i
+  ],
 
-  /* Mining */
-  /\bmine\b/i,
-  /\bmining\b/i,
-  /\bcrypto\s+mining\b/i,
-  /\bbitcoin\s+mining\b/i,
-  /\bcloud\s+mining\b/i,
-  /\bmining\s+profit\b/i,
+  yield: [
+    /\byield\b/i,
+    /\bhigh\s+yield\b/i,
+    /\byield\s+farming\b/i,
+    /\byield\s+program\b/i,
+    /\byield\s+rewards?\b/i
+  ],
 
-  /* Yield */
-  /\byield\b/i,
-  /\byield\s+farming\b/i,
-  /\bhigh\s+yield\b/i,
-  /\bhigh\s+yield\s+investment\b/i,
+  referral: [
+    /\breferral\s+bonus\b/i,
+    /\breferral\s+earning\b/i,
+    /\breferral\s+income\b/i,
+    /\baffiliate\s+commission\b/i,
+    /\binvite\s+and\s+earn\b/i,
+    /\bteam\s+income\b/i,
+    /\bteam\s+bonus\b/i,
+    /\blevel\s+bonus\b/i
+  ],
 
-  /* Funds / finance */
-  /\bwealth\b/i,
-  /\bwealth\s+management\b/i,
-  /\bcapital\b/i,
-  /\bcapital\s+investment\b/i,
-  /\bportfolio\b/i,
-  /\bportfolio\s+management\b/i,
-  /\basset\s+management\b/i,
-  /\binvestment\s+fund\b/i,
-  /\binvestment\s+funds\b/i,
-  /\bfinancial\s+freedom\b/i,
+  account: [
+    /\bcreate\s+account\b/i,
+    /\bregister\s+now\b/i,
+    /\bsign\s+up\b/i,
+    /\blog\s*in\b/i,
+    /\blogin\b/i,
+    /\btrading\s+account\b/i,
+    /\binvestment\s+account\b/i,
+    /\bwallet\s+account\b/i,
+    /\buser\s+dashboard\b/i
+  ],
 
-  /* Referral / affiliate earning */
-  /\breferral\b/i,
-  /\breferrals\b/i,
-  /\breferral\s+bonus\b/i,
-  /\baffiliate\b/i,
-  /\baffiliate\s+program\b/i,
-  /\baffiliate\s+commission\b/i,
-  /\bcommission\b/i,
-  /\binvite\s+and\s+earn\b/i,
-  /\bteam\s+income\b/i,
-  /\bteam\s+bonus\b/i,
-
-  /* Bonus / rewards */
-  /\bbonus\b/i,
-  /\breward\b/i,
-  /\brewards\b/i,
-  /\bdeposit\s+bonus\b/i,
-  /\bwelcome\s+bonus\b/i
-];
+  action: [
+    /\binvest\s+now\b/i,
+    /\bstart\s+investing\b/i,
+    /\bstart\s+trading\b/i,
+    /\bdeposit\s+now\b/i,
+    /\bdeposit\s+funds?\b/i,
+    /\bchoose\s+(?:a\s+)?plan\b/i,
+    /\bselect\s+(?:a\s+)?plan\b/i,
+    /\bjoin\s+now\b/i,
+    /\bstart\s+earning\b/i,
+    /\bwithdraw\s+now\b/i
+  ]
+};
 
 
 /* =========================================================
@@ -250,9 +300,7 @@ const ROI_PATTERNS = [
   /\bprofit\s+rate\b/i,
   /\breturn\s+rate\b/i,
   /\bpercentage\s+return\b/i,
-
   /\b\d+(?:\.\d+)?\s*%\s*(?:roi|return|profit)\b/i,
-
   /\bup\s+to\s+\d+(?:\.\d+)?\s*%\b/i
 ];
 
@@ -260,8 +308,7 @@ const ROI_PATTERNS = [
 /* =========================================================
  * PAYMENT METHODS
  *
- * These are EVIDENCE only.
- * They DO NOT decide whether a domain is a candidate.
+ * EVIDENCE ONLY
  * ========================================================= */
 
 const PAYMENT_PATTERNS = {
@@ -272,28 +319,14 @@ const PAYMENT_PATTERNS = {
     /\bbank\s+account\b/i,
     /\bbank\s+details\b/i,
     /\bbank\s+payment\b/i,
-
     /\baccount\s+number\b/i,
     /\baccount\s+title\b/i,
     /\baccount\s+holder\b/i,
     /\baccount\s+name\b/i,
-
     /\biban\b/i,
     /\bpkr\b/i,
     /\bpakistani\s+rupees?\b/i,
-    /\bpakistan\s+bank\b/i,
-
-    /\bwire\s+transfer\b/i,
-    /\bwire\s+payment\b/i,
-
-    /\bhabib\s+bank\b/i,
-    /\bhbl\b/i,
-    /\bmeezan\b/i,
-    /\bubl\b/i,
-    /\bmcb\b/i,
-    /\balfalah\b/i,
-    /\bfaysal\s+bank\b/i,
-    /\bjs\s+bank\b/i
+    /\bwire\s+transfer\b/i
   ],
 
   easypaisa: [
@@ -311,28 +344,18 @@ const PAYMENT_PATTERNS = {
     /\btrc20\b/i,
     /\berc20\b/i,
     /\bbep20\b/i,
-
     /\bbitcoin\b/i,
     /\bbtc\b/i,
-
     /\bethereum\b/i,
-    /\beth\b/i,
-
-    /\bcrypto\b/i,
-    /\bcryptocurrency\b/i,
-
     /\bcrypto\s+wallet\b/i,
     /\bwallet\s+address\b/i,
-
-    /\busdc\b/i,
-    /\bsolana\b/i,
-    /\btron\b/i
+    /\busdc\b/i
   ]
 };
 
 
 /* =========================================================
- * PARKED / FOR-SALE DETECTION
+ * HARD PARKING / FOR-SALE DETECTION
  * ========================================================= */
 
 const PARKED_PATTERNS = [
@@ -340,38 +363,45 @@ const PARKED_PATTERNS = [
   /\bdomain\s+for\s+sale\b/i,
   /\bthis\s+domain\s+is\s+for\s+sale\b/i,
   /\bthis\s+domain\s+is\s+available\s+for\s+purchase\b/i,
+  /\bthis\s+domain\s+may\s+be\s+for\s+sale\b/i,
 
   /\bbuy\s+(?:this\s+)?domain\b/i,
-  /\bbuy\s+domain\b/i,
   /\bpurchase\s+(?:this\s+)?domain\b/i,
-
-  /\bdomain\s+name\s+for\s+sale\b/i,
-  /\bdomain\s+is\s+parked\b/i,
-  /\bparked\s+domain\b/i,
-  /\bdomain\s+parking\b/i,
-  /\bpark\s+this\s+domain\b/i,
-
-  /\bmake\s+an\s+offer\s+for\s+this\s+domain\b/i,
-  /\bmake\s+offer\b/i,
-
   /\bget\s+this\s+domain\b/i,
   /\bown\s+this\s+domain\b/i,
   /\bclaim\s+this\s+domain\b/i,
 
+  /\bpremium\s+domain\b/i,
+  /\bpremium\s+domain\s+name\b/i,
   /\bdomain\s+marketplace\b/i,
   /\bdomain\s+auction\b/i,
+  /\bdomain\s+parking\b/i,
+  /\bparked\s+domain\b/i,
+  /\bdomain\s+is\s+parked\b/i,
+
+  /\bmake\s+an\s+offer\b/i,
+  /\bmake\s+an\s+offer\s+for\s+this\s+domain\b/i,
+  /\binquire\s+about\s+this\s+domain\b/i,
+  /\binquire\s+for\s+this\s+domain\b/i,
 
   /\bsedo\b/i,
   /\bafternic\b/i,
   /\bdan\.com\b/i,
-  /\bgodaddy\s+domain\b/i,
-  /\bnamecheap\s+marketplace\b/i,
-
   /\bparkingcrew\b/i,
   /\bparking\s+crew\b/i,
+  /\bhugedomains\b/i,
+  /\bbodis\b/i,
+  /\bparklogic\b/i,
+
+  /\brelated\s+searches\b/i,
+  /\bdomain\s+has\s+been\s+registered\b/i,
+  /\bdomain\s+registration\b/i,
 
   /\bthis\s+webpage\s+is\s+parked\b/i,
-  /\bwebsite\s+coming\s+soon\b/i
+  /\bwebsite\s+coming\s+soon\b/i,
+  /\bcoming\s+soon\b/i,
+  /\bunder\s+construction\b/i,
+  /\bfuture\s+home\s+of\b/i
 ];
 
 
@@ -379,16 +409,63 @@ const PARKED_URL_PATTERNS = [
   /sedo\.com/i,
   /afternic\.com/i,
   /dan\.com/i,
-  /godaddy\.com\/domain/i,
-  /namecheap\.com\/domains/i
+  /hugedomains\.com/i,
+  /parkingcrew\.net/i,
+  /parklogic\.com/i
 ];
 
 
 /* =========================================================
- * DEEP-SCAN PATHS
+ * DEEP SCAN PATHS
  * ========================================================= */
 
 const RELEVANT_PATHS = [
+
+  "/invest",
+  "/investment",
+  "/investments",
+  "/plans",
+  "/investment-plans",
+  "/profit-plans",
+  "/earning-plans",
+  "/earn",
+  "/earning",
+  "/earnings",
+  "/income",
+
+  "/deposit",
+  "/deposits",
+  "/deposit-funds",
+  "/fund",
+  "/funds",
+
+  "/withdraw",
+  "/withdrawal",
+  "/withdrawals",
+
+  "/trading",
+  "/trade",
+  "/forex",
+  "/broker",
+
+  "/crypto",
+  "/cryptocurrency",
+  "/staking",
+  "/mining",
+  "/defi",
+
+  "/portfolio",
+  "/assets",
+  "/wealth",
+
+  "/referral",
+  "/referrals",
+  "/affiliate",
+
+  "/account",
+  "/dashboard",
+  "/login",
+  "/register",
 
   "/about",
   "/about-us",
@@ -414,55 +491,9 @@ const RELEVANT_PATHS = [
   "/risk",
   "/risk-disclosure",
 
-  "/invest",
-  "/investment",
-  "/investments",
-
-  "/deposit",
-  "/deposits",
-  "/deposit-funds",
-
-  "/plans",
-  "/investment-plans",
-  "/earning-plans",
-  "/profit-plans",
-
-  "/profit",
-  "/profits",
-
-  "/earning",
-  "/earnings",
-
-  "/income",
-
-  "/withdraw",
-  "/withdrawal",
-  "/withdrawals",
-
-  "/trading",
-  "/trade",
-  "/forex",
-
-  "/crypto",
-  "/cryptocurrency",
-
-  "/staking",
-  "/mining",
-
-  "/portfolio",
-  "/fund",
-  "/funds",
-
-  "/payment",
-  "/payments",
-
-  "/support",
-  "/help",
   "/faq",
-
-  "/referral",
-  "/referrals",
-  "/affiliate"
+  "/help",
+  "/support"
 ];
 
 
@@ -473,6 +504,7 @@ const RELEVANT_PATHS = [
 export default async function handler(req, res) {
 
   if (req.method !== "POST") {
+
     return res.status(405).json({
       ok: false,
       error: "Method not allowed. Use POST."
@@ -481,21 +513,18 @@ export default async function handler(req, res) {
 
   try {
 
-    const body = req.body || {};
+    const body =
+      req.body || {};
 
     const rawDomains =
       Array.isArray(body.domains)
         ? body.domains
         : [];
 
-    /*
-     * Payment selections are retained for
-     * reporting compatibility.
-     *
-     * They are NOT used as candidate gate.
-     */
     const selectedPayments =
-      normalizePayments(body.paymentMethods);
+      normalizePayments(
+        body.paymentMethods
+      );
 
     const domains =
       uniqueDomains(
@@ -507,6 +536,7 @@ export default async function handler(req, res) {
     if (!domains.length) {
 
       return res.status(200).json({
+
         ok: true,
 
         scanned: 0,
@@ -521,15 +551,15 @@ export default async function handler(req, res) {
 
         paymentMatches: 0,
 
+        noPaymentCandidates: 0,
+
         candidates: [],
 
         selectedPayments
       });
     }
 
-
     const results = [];
-
 
     await runWithConcurrency(
       domains,
@@ -547,7 +577,8 @@ export default async function handler(req, res) {
 
           results.push({
 
-            domain: item.domain,
+            domain:
+              item.domain,
 
             registeredAt:
               item.registeredAt || null,
@@ -555,9 +586,11 @@ export default async function handler(req, res) {
             registrationVerified:
               item.registrationVerified === true,
 
-            status: "error",
+            status:
+              "error",
 
-            websiteType: "scanner-error",
+            websiteType:
+              "scanner-error",
 
             errors: [
               error?.message ||
@@ -592,26 +625,12 @@ export default async function handler(req, res) {
       );
 
 
-    /*
-     * =====================================================
-     * PRIMARY CANDIDATE FILTER
-     * =====================================================
-     *
-     * PAYMENT IS NOT REQUIRED.
-     *
-     * Investment relevance alone is enough.
-     */
-
     const investmentMatches =
       realActiveWebsites.filter(
         item =>
           item.investment?.relevant === true
       );
 
-
-    /*
-     * Payment matches are now only statistics.
-     */
 
     const paymentMatches =
       investmentMatches.filter(
@@ -623,26 +642,11 @@ export default async function handler(req, res) {
       );
 
 
-    /*
-     * NO artificial candidate limit.
-     *
-     * 3 candidates -> 3
-     * 20 candidates -> 20
-     * 100 candidates -> 100
-     */
-
     const candidates =
       investmentMatches.sort(
-        (a, b) => {
-
-          const scoreA =
-            a.investment?.score || 0;
-
-          const scoreB =
-            b.investment?.score || 0;
-
-          return scoreB - scoreA;
-        }
+        (a, b) =>
+          (b.investment?.score || 0) -
+          (a.investment?.score || 0)
       );
 
 
@@ -659,7 +663,8 @@ export default async function handler(req, res) {
       realActiveWebsites:
         realActiveWebsites.length,
 
-      parkedRejected,
+      parkedRejected:
+        parkedRejected.length,
 
       investmentMatches:
         investmentMatches.length,
@@ -667,9 +672,6 @@ export default async function handler(req, res) {
       paymentMatches:
         paymentMatches.length,
 
-      /*
-       * Useful diagnostic counters.
-       */
       noPaymentCandidates:
         investmentMatches.filter(
           item =>
@@ -780,6 +782,12 @@ async function scanDomain(input) {
     snippets:
       [],
 
+    parked: {
+      isParked: false,
+      confidence: "none",
+      matches: []
+    },
+
     investment: {
 
       relevant:
@@ -787,6 +795,9 @@ async function scanDomain(input) {
 
       score:
         0,
+
+      confidence:
+        "none",
 
       keywords:
         [],
@@ -800,10 +811,22 @@ async function scanDomain(input) {
       signalGroups:
         [],
 
+      actionSignals:
+        [],
+
+      contextualSignals:
+        [],
+
       primarySignalCount:
         0,
 
       strongSignalCount:
+        0,
+
+      actionableSignalCount:
+        0,
+
+      financialContextCount:
         0
     },
 
@@ -997,7 +1020,7 @@ async function scanDomain(input) {
 
 
   /* =====================================================
-   * PARKED / FOR-SALE GATE
+   * HARD PARKING GATE
    * ===================================================== */
 
   const parkedAnalysis =
@@ -1030,7 +1053,7 @@ async function scanDomain(input) {
 
 
   /* =====================================================
-   * EMPTY WEBSITE GATE
+   * EMPTY / PLACEHOLDER GATE
    * ===================================================== */
 
   if (
@@ -1095,18 +1118,18 @@ async function scanDomain(input) {
   /* =====================================================
    * DEEP SCAN
    *
-   * IMPORTANT:
-   *
-   * Deep scan is triggered by investment/financial
-   * signals OR detected payment evidence.
-   *
-   * Payment is NOT required.
+   * Only relevant pages are fetched.
+   * Payment alone does NOT trigger candidate status.
    * ===================================================== */
 
-  if (
-    result.investment.relevant ||
-    result.paymentMethods.detected.length
-  ) {
+  const shouldDeepScan =
+    shouldPerformDeepScan(
+      result.investment,
+      result.paymentMethods
+    );
+
+
+  if (shouldDeepScan) {
 
     const links =
       extractPageLinks(
@@ -1148,6 +1171,12 @@ async function scanDomain(input) {
       }
 
 
+      const childTitle =
+        extractTitle(
+          child.text
+        );
+
+
       const childText =
         normalizeForSearch(
           child.text
@@ -1178,7 +1207,8 @@ async function scanDomain(input) {
 
 
       /*
-       * Ignore marketplace / parked child pages.
+       * NEVER allow parked child pages to contribute
+       * financial evidence.
        */
 
       const childParked =
@@ -1186,9 +1216,7 @@ async function scanDomain(input) {
           child,
           childCombined,
           child.finalUrl,
-          extractTitle(
-            child.text
-          )
+          childTitle
         );
 
 
@@ -1259,18 +1287,18 @@ async function scanDomain(input) {
 
 
   /*
-   * Recalculate after deep scan.
+   * FINAL CONTEXT DECISION
    */
 
   result.investment.relevant =
     isInvestmentCandidate(
-      result.investment
+      result.investment,
+      result.content
     );
 
 
   result.transparency.candidate =
-    result.investment.relevant ||
-    result.paymentMethods.detected.length > 0;
+    result.investment.relevant;
 
 
   return result;
@@ -1278,11 +1306,12 @@ async function scanDomain(input) {
 
 
 /* =========================================================
- * INVESTMENT CANDIDATE DECISION
+ * FINAL INVESTMENT CANDIDATE DECISION
  * ========================================================= */
 
 function isInvestmentCandidate(
-  investment
+  investment,
+  content
 ) {
 
   if (!investment) {
@@ -1290,35 +1319,266 @@ function isInvestmentCandidate(
   }
 
 
+  const text =
+    String(
+      content || ""
+    ).toLowerCase();
+
+
   /*
-   * Any strong financial signal is enough.
+   * A genuine financial activity usually contains
+   * one or more of these combinations.
+   */
+
+  const contextualPairs = [
+
+    [
+      /\binvest(?:ment|ing)?\b/i,
+      /\b(?:plan|program|package|opportunity|account|fund|deposit|profit|return|roi)\b/i
+    ],
+
+    [
+      /\bdeposit\b/i,
+      /\b(?:profit|return|earning|income|investment|plan|withdraw)\b/i
+    ],
+
+    [
+      /\bprofit\b/i,
+      /\b(?:plan|daily|weekly|monthly|deposit|investment|withdraw|earning|income|return)\b/i
+    ],
+
+    [
+      /\bearning\b/i,
+      /\b(?:plan|program|deposit|investment|profit|income|withdraw|daily|monthly)\b/i
+    ],
+
+    [
+      /\b(?:trading|trade)\b/i,
+      /\b(?:account|platform|broker|signals?|deposit|profit|forex|crypto)\b/i
+    ],
+
+    [
+      /\bforex\b/i,
+      /\b(?:trading|broker|account|signals?|deposit|profit)\b/i
+    ],
+
+    [
+      /\bcrypto(?:currency)?\b/i,
+      /\b(?:investment|investing|trading|earning|staking|mining|deposit|profit|yield|wallet)\b/i
+    ],
+
+    [
+      /\bbitcoin\b/i,
+      /\b(?:mining|investment|investing|trading|staking|earning|profit|deposit)\b/i
+    ],
+
+    [
+      /\bstaking\b/i,
+      /\b(?:rewards?|profit|income|earn|apy|yield|deposit)\b/i
+    ],
+
+    [
+      /\bmining\b/i,
+      /\b(?:profit|income|earning|rewards?|investment|deposit|cloud)\b/i
+    ],
+
+    [
+      /\byield\b/i,
+      /\b(?:farming|rewards?|profit|investment|deposit|apy|earn)\b/i
+    ],
+
+    [
+      /\bwithdraw(?:al)?\b/i,
+      /\b(?:profit|earning|income|investment|deposit|funds?)\b/i
+    ],
+
+    [
+      /\breferral\b/i,
+      /\b(?:earning|income|commission|investment|profit|deposit)\b/i
+    ]
+  ];
+
+
+  let contextualMatches =
+    0;
+
+
+  for (
+    const [a, b]
+    of contextualPairs
+  ) {
+
+    if (
+      a.test(text) &&
+      b.test(text)
+    ) {
+
+      contextualMatches++;
+    }
+  }
+
+
+  /*
+   * Actionable financial activity.
+   */
+
+  const actionablePatterns = [
+
+    /\binvest\s+now\b/i,
+    /\bstart\s+investing\b/i,
+    /\bstart\s+trading\b/i,
+    /\bdeposit\s+now\b/i,
+    /\bminimum\s+deposit\b/i,
+    /\binvestment\s+plans?\b/i,
+    /\bprofit\s+plans?\b/i,
+    /\bearning\s+plans?\b/i,
+    /\bchoose\s+(?:a\s+)?plan\b/i,
+    /\bselect\s+(?:a\s+)?plan\b/i,
+    /\bcreate\s+account\b/i,
+    /\bregister\s+now\b/i,
+    /\btrading\s+account\b/i,
+    /\binvestment\s+account\b/i,
+    /\bwithdraw\s+profit\b/i,
+    /\bwithdraw\s+earnings?\b/i,
+    /\bdeposit\s+funds?\b/i,
+    /\bfund\s+your\s+account\b/i,
+    /\bstake\s+and\s+earn\b/i,
+    /\bcloud\s+mining\b/i
+  ];
+
+
+  let actionable =
+    0;
+
+
+  for (
+    const pattern
+    of actionablePatterns
+  ) {
+
+    if (
+      pattern.test(text)
+    ) {
+      actionable++;
+    }
+  }
+
+
+  /*
+   * Strong percentage / ROI claims.
+   */
+
+  const strongClaim =
+    investment.strongSignalCount > 0;
+
+
+  /*
+   * Multiple independent financial groups.
+   */
+
+  const groups =
+    new Set(
+      investment.signalGroups || []
+    );
+
+
+  const financialGroupCount =
+    groups.size;
+
+
+  /*
+   * FINAL RULE
+   *
+   * 1. Strong financial claim + financial context
+   * 2. At least one strong contextual combination
+   * 3. Multiple independent financial groups
+   *    AND at least one actionable signal
+   * 4. Explicit investment/trading/earning platform
+   *
+   * Generic words alone NEVER qualify.
    */
 
   if (
-    investment.strongSignalCount > 0
+    strongClaim &&
+    contextualMatches >= 1
+  ) {
+    return true;
+  }
+
+
+  if (
+    contextualMatches >= 2
+  ) {
+    return true;
+  }
+
+
+  if (
+    financialGroupCount >= 3 &&
+    actionable >= 1
+  ) {
+    return true;
+  }
+
+
+  if (
+    actionable >= 2 &&
+    financialGroupCount >= 2
   ) {
     return true;
   }
 
 
   /*
-   * Multiple primary financial signals
-   * are strong evidence.
+   * Explicit financial platform patterns.
    */
 
   if (
-    investment.primarySignalCount >= 2
+    /\b(?:investment|trading|earning)\s+platform\b/i.test(text) &&
+    (
+      /\b(?:account|deposit|profit|return|register|login)\b/i.test(text)
+    )
+  ) {
+    return true;
+  }
+
+
+  return false;
+}
+
+
+/* =========================================================
+ * DEEP SCAN DECISION
+ * ========================================================= */
+
+function shouldPerformDeepScan(
+  investment,
+  payments
+) {
+
+  if (
+    investment?.relevant === true
+  ) {
+    return true;
+  }
+
+
+  if (
+    investment?.signalGroups?.length >= 2
   ) {
     return true;
   }
 
 
   /*
-   * A high combined score also qualifies.
+   * Payment evidence alone does not make a candidate.
+   * We only deep scan payment-heavy pages when there is
+   * at least one financial signal.
    */
 
   if (
-    investment.score >= 8
+    payments?.detected?.length &&
+    investment?.primarySignalCount > 0
   ) {
     return true;
   }
@@ -1343,7 +1603,8 @@ function detectParkedPage(
     [
       combined || "",
       title || "",
-      finalUrl || ""
+      finalUrl || "",
+      page?.text || ""
     ].join("\n");
 
 
@@ -1389,15 +1650,19 @@ function detectParkedPage(
   }
 
 
-  const strong =
+  /*
+   * Explicit parking / sale signal = HARD REJECT.
+   */
+
+  const explicitSale =
     matches.some(
       value =>
-        /for sale|buy domain|parked|domain parking|sedo|afternic|dan\.com|domain auction/i
+        /for\s+sale|buy\s+(?:this\s+)?domain|purchase\s+(?:this\s+)?domain|premium\s+domain|domain\s+marketplace|domain\s+auction|make\s+an\s+offer|inquire\s+about\s+this\s+domain/i
           .test(value)
     );
 
 
-  if (strong) {
+  if (explicitSale) {
 
     return {
 
@@ -1418,15 +1683,108 @@ function detectParkedPage(
   }
 
 
+  /*
+   * Registrar / parking provider URL.
+   */
+
   if (
-    matches.length &&
-    /coming\s+soon|under\s+construction/i.test(
+    PARKED_URL_PATTERNS.some(
+      pattern =>
+        pattern.test(
+          String(
+            finalUrl || ""
+          )
+        )
+    )
+  ) {
+
+    return {
+
+      isParked:
+        true,
+
+      confidence:
+        "high",
+
+      matches:
+        uniqueStrings(
+          matches
+        ),
+
+      reason:
+        "Domain marketplace or parking provider detected"
+    };
+  }
+
+
+  /*
+   * Placeholder page.
+   */
+
+  if (
+    /coming\s+soon|under\s+construction|future\s+home\s+of/i.test(
       text
     ) &&
     isEssentiallyEmptyWebsite(
       combined,
       title
     )
+  ) {
+
+    return {
+
+      isParked:
+        true,
+
+      confidence:
+        "high",
+
+      matches:
+        uniqueStrings(
+          matches
+        ),
+
+      reason:
+        "Placeholder/coming-soon website detected"
+    };
+  }
+
+
+  /*
+   * Multiple weak parking indicators together.
+   */
+
+  const weakParking =
+    [
+      /\bparked\b/i,
+      /\bparking\b/i,
+      /\brelated\s+searches\b/i,
+      /\bpremium\s+domain\b/i,
+      /\bdomain\s+name\b/i,
+      /\bthis\s+domain\b/i
+    ];
+
+
+  let weakCount =
+    0;
+
+
+  for (
+    const pattern
+    of weakParking
+  ) {
+
+    if (
+      pattern.test(text)
+    ) {
+      weakCount++;
+    }
+  }
+
+
+  if (
+    weakCount >= 3 &&
+    !/\b(?:investment|trading|staking|mining|deposit|earning\s+plan)\b/i.test(text)
   ) {
 
     return {
@@ -1443,7 +1801,7 @@ function detectParkedPage(
         ),
 
       reason:
-        "Placeholder/coming-soon website detected"
+        "Multiple domain-parking indicators detected"
     };
   }
 
@@ -1494,12 +1852,15 @@ function isEssentiallyEmptyWebsite(
 
 
   if (
-    cleaned.length < 250 &&
+    cleaned.length < 350 &&
     (
       titleOnly === "coming soon" ||
       titleOnly === "under construction" ||
       titleOnly === "domain for sale" ||
-      titleOnly === "this domain is for sale"
+      titleOnly === "this domain is for sale" ||
+      titleOnly === "parking page" ||
+      titleOnly === "domain parking" ||
+      titleOnly === "parked"
     )
   ) {
     return true;
@@ -1531,53 +1892,80 @@ function analyzeInvestment(
 
 
   /*
-   * Primary signals
+   * Primary signals.
    */
 
   for (
-    const pattern
-    of INVESTMENT_PATTERNS
+    const [group, patterns]
+    of Object.entries(
+      SIGNAL_PATTERNS
+    )
   ) {
 
-    const match =
-      value.match(pattern);
+    let groupMatched =
+      false;
 
-    if (!match) {
-      continue;
+
+    for (
+      const pattern
+      of patterns
+    ) {
+
+      const match =
+        value.match(pattern);
+
+
+      if (!match) {
+        continue;
+      }
+
+
+      const keyword =
+        match[0].trim();
+
+
+      if (
+        !result.investment.keywords.includes(
+          keyword
+        )
+      ) {
+
+        result.investment.keywords.push(
+          keyword
+        );
+
+        matchedPrimary++;
+      }
+
+
+      result.investment.score +=
+        signalWeight(
+          group,
+          keyword
+        );
+
+
+      groupMatched =
+        true;
     }
-
-
-    const keyword =
-      match[0].trim();
 
 
     if (
-      !result.investment.keywords.includes(
-        keyword
+      groupMatched &&
+      !result.investment.signalGroups.includes(
+        group
       )
     ) {
 
-      result.investment.keywords.push(
-        keyword
+      result.investment.signalGroups.push(
+        group
       );
-
-      matchedPrimary++;
     }
-
-
-    const weight =
-      keywordWeight(
-        keyword
-      );
-
-
-    result.investment.score +=
-      weight;
   }
 
 
   /*
-   * Daily / guaranteed / high-return signals
+   * Daily / guaranteed / high-return signals.
    */
 
   for (
@@ -1606,7 +1994,7 @@ function analyzeInvestment(
 
 
     result.investment.score +=
-      15;
+      18;
 
 
     result.investment.dailyReturnClaims.push(
@@ -1616,7 +2004,7 @@ function analyzeInvestment(
 
 
   /*
-   * ROI signals
+   * ROI signals.
    */
 
   for (
@@ -1645,7 +2033,7 @@ function analyzeInvestment(
 
 
     result.investment.score +=
-      10;
+      12;
 
 
     result.investment.roiClaims.push(
@@ -1654,95 +2042,124 @@ function analyzeInvestment(
   }
 
 
+  /*
+   * Action signals.
+   */
+
+  for (
+    const pattern
+    of SIGNAL_PATTERNS.action
+  ) {
+
+    if (
+      pattern.test(value)
+    ) {
+
+      result.investment.actionableSignalCount++;
+    }
+  }
+
+
+  /*
+   * Contextual combinations.
+   */
+
+  const contextualPairs = [
+
+    [/\binvest(?:ment|ing)?\b/i, /\b(?:plan|program|package|opportunity|deposit|profit|return|roi)\b/i],
+    [/\bdeposit\b/i, /\b(?:profit|return|earning|income|investment|withdraw)\b/i],
+    [/\bprofit\b/i, /\b(?:plan|daily|weekly|monthly|deposit|investment|earning|income|return)\b/i],
+    [/\bearning\b/i, /\b(?:plan|program|deposit|investment|profit|income|withdraw|daily|monthly)\b/i],
+    [/\btrading\b/i, /\b(?:account|platform|broker|signals?|deposit|profit|forex|crypto)\b/i],
+    [/\bforex\b/i, /\b(?:trading|broker|account|signals?|deposit|profit)\b/i],
+    [/\bcrypto(?:currency)?\b/i, /\b(?:investment|investing|trading|earning|staking|mining|deposit|profit|yield)\b/i],
+    [/\bstaking\b/i, /\b(?:rewards?|profit|income|earn|apy|yield|deposit)\b/i],
+    [/\bmining\b/i, /\b(?:profit|income|earning|rewards?|investment|deposit|cloud)\b/i],
+    [/\bwithdraw(?:al)?\b/i, /\b(?:profit|earning|income|investment|deposit|funds?)\b/i],
+    [/\breferral\b/i, /\b(?:earning|income|commission|investment|profit|deposit)\b/i]
+  ];
+
+
+  let contextual =
+    0;
+
+
+  for (
+    const [a, b]
+    of contextualPairs
+  ) {
+
+    if (
+      a.test(value) &&
+      b.test(value)
+    ) {
+
+      contextual++;
+    }
+  }
+
+
+  result.investment.financialContextCount +=
+    contextual;
+
+
+  /*
+   * Relevance score.
+   *
+   * This score is NOT the Gemini scam score.
+   */
+
+  result.investment.score +=
+    contextual * 8;
+
+
+  /*
+   * Counts.
+   */
+
   result.investment.primarySignalCount +=
     matchedPrimary;
-
 
   result.investment.strongSignalCount +=
     matchedStrong;
 
 
   /*
-   * Signal groups
+   * Keyword arrays.
    */
-
-  const lower =
-    value.toLowerCase();
-
-
-  const groups = {
-
-    investment:
-      /\binvest|investment|investing|investor/i
-        .test(lower),
-
-    crypto:
-      /\bcrypto|cryptocurrency|bitcoin|btc|ethereum|usdt|usdc|defi|token\b/i
-        .test(lower),
-
-    trading:
-      /\btrading|trader|forex|copy trading|trade\b/i
-        .test(lower),
-
-    profit:
-      /\bprofit|profits|yield|return|roi\b/i
-        .test(lower),
-
-    earning:
-      /\bearn|earning|earnings|income|passive income\b/i
-        .test(lower),
-
-    deposit:
-      /\bdeposit|deposits|deposit funds?\b/i
-        .test(lower),
-
-    withdrawal:
-      /\bwithdraw|withdrawal|withdrawals\b/i
-        .test(lower),
-
-    referral:
-      /\breferral|affiliate|commission|invite and earn\b/i
-        .test(lower),
-
-    staking:
-      /\bstake|staking|staking rewards?\b/i
-        .test(lower),
-
-    mining:
-      /\bmining|crypto mining|cloud mining\b/i
-        .test(lower)
-  };
-
-
-  result.investment.signalGroups =
-    Object.entries(groups)
-      .filter(
-        ([, matched]) =>
-          matched
-      )
-      .map(
-        ([name]) =>
-          name
-      );
-
 
   result.investment.keywords =
     uniqueStrings(
       result.investment.keywords
     );
 
-
   result.investment.dailyReturnClaims =
     uniqueStrings(
       result.investment.dailyReturnClaims
     );
-
 
   result.investment.roiClaims =
     uniqueStrings(
       result.investment.roiClaims
     );
 
+
+  result.investment.contextualSignals =
+    uniqueStrings(
+      result.investment.contextualSignals
+        .concat(
+          contextual > 0
+            ? [
+                `${contextual} financial context combination(s)`
+              ]
+            : []
+        )
+    );
+
+
+  /*
+   * Cap internal score.
+   */
 
   result.investment.score =
     Math.min(
@@ -1751,59 +2168,107 @@ function analyzeInvestment(
     );
 
 
+  /*
+   * Preliminary relevance.
+   */
+
   result.investment.relevant =
     isInvestmentCandidate(
-      result.investment
+      result.investment,
+      value
     );
+
+
+  if (
+    result.investment.relevant
+  ) {
+
+    result.investment.confidence =
+      result.investment.score >= 70
+        ? "high"
+        : result.investment.score >= 40
+          ? "medium"
+          : "low";
+  }
 }
 
 
 /* =========================================================
- * KEYWORD WEIGHTS
+ * SIGNAL WEIGHTS
  * ========================================================= */
 
-function keywordWeight(
+function signalWeight(
+  group,
   keyword
 ) {
 
   const value =
-    String(keyword || "")
-      .toLowerCase();
+    String(
+      keyword || ""
+    ).toLowerCase();
 
 
-  /*
-   * Strongest core signals.
-   */
+  switch (group) {
 
-  if (
-    /investment|investing|investor|crypto|cryptocurrency|trading|forex|staking|staking|mining|roi/i
-      .test(value)
-  ) {
-    return 8;
+    case "investment":
+      return 10;
+
+    case "deposit":
+      return 8;
+
+    case "profit":
+      return 8;
+
+    case "return":
+      return 7;
+
+    case "roi":
+      return 10;
+
+    case "earning":
+      return 7;
+
+    case "withdrawal":
+      return 7;
+
+    case "trading":
+      return 9;
+
+    case "forex":
+      return 9;
+
+    case "crypto":
+      return 6;
+
+    case "staking":
+      return 9;
+
+    case "mining":
+      return 9;
+
+    case "yield":
+      return 8;
+
+    case "referral":
+      return 3;
+
+    case "account":
+      return 4;
+
+    case "action":
+      return 6;
+
+    default:
+      break;
   }
 
 
-  /*
-   * Strong financial activity.
-   */
-
   if (
-    /profit|return|yield|earning|earnings|income|deposit|withdraw/i
-      .test(value)
+    /guaranteed|fixed|daily|monthly|weekly/i.test(
+      value
+    )
   ) {
-    return 6;
-  }
-
-
-  /*
-   * Supporting monetization signals.
-   */
-
-  if (
-    /referral|affiliate|commission|bonus|reward/i
-      .test(value)
-  ) {
-    return 3;
+    return 10;
   }
 
 
@@ -1879,10 +2344,9 @@ function analyzePayments(
 
 
 /* =========================================================
- * SELECTED PAYMENT FILTER
+ * PAYMENT FILTER
  *
- * Kept only for reporting compatibility.
- * It does NOT control candidate selection.
+ * REPORTING ONLY
  * ========================================================= */
 
 function normalizePayments(
@@ -2000,12 +2464,10 @@ function analyzeTransparency(
       result.transparency.company
     );
 
-
   result.transparency.legal =
     uniqueStrings(
       result.transparency.legal
     );
-
 
   result.transparency.support =
     uniqueStrings(
@@ -2040,9 +2502,11 @@ async function fetchPage(
       await fetch(
         url,
         {
-          method: "GET",
+          method:
+            "GET",
 
-          redirect: "follow",
+          redirect:
+            "follow",
 
           headers: {
 
@@ -2050,7 +2514,7 @@ async function fetchPage(
               "text/html,application/xhtml+xml,text/plain,*/*",
 
             "User-Agent":
-              "Mozilla/5.0 LD76-Investment-Radar/2.0"
+              "Mozilla/5.0 LD76-Investment-Radar/3.0"
           },
 
           signal:
@@ -2535,8 +2999,13 @@ function collectSignalSnippets(
     }
 
 
+    /*
+     * Only collect financially meaningful lines.
+     * Generic payment-only lines are not enough.
+     */
+
     if (
-      /investment|invest|crypto|cryptocurrency|bitcoin|trading|forex|staking|mining|profit|roi|return|earning|income|deposit|withdraw|yield|referral|affiliate|commission/i
+      /investment|investing|investor|profit|roi|return\s+on\s+investment|trading|forex|staking|crypto\s+investment|crypto\s+trading|mining\s+profit|earning\s+plan|passive\s+income|deposit\s+profit|withdraw\s+profit|daily\s+profit|daily\s+return|referral\s+earning|referral\s+commission/i
         .test(value)
     ) {
 
@@ -2574,12 +3043,20 @@ function normalizeInputDomain(
     "string"
   ) {
 
+    const domain =
+      normalizeDomain(
+        value
+      );
+
+
+    if (!domain) {
+      return null;
+    }
+
+
     return {
 
-      domain:
-        normalizeDomain(
-          value
-        ),
+      domain,
 
       registeredAt:
         null,
@@ -2596,12 +3073,20 @@ function normalizeInputDomain(
     "object"
   ) {
 
+    const domain =
+      normalizeDomain(
+        value.domain
+      );
+
+
+    if (!domain) {
+      return null;
+    }
+
+
     return {
 
-      domain:
-        normalizeDomain(
-          value.domain
-        ),
+      domain,
 
       registeredAt:
         value.registeredAt ||
@@ -2802,7 +3287,8 @@ async function runWithConcurrency(
   await Promise.all(
     Array.from(
       {
-        length: workers
+        length:
+          workers
       },
       runner
     )
@@ -2833,4 +3319,4 @@ function uniqueStrings(
         )
     )
   ];
-    }
+  }
