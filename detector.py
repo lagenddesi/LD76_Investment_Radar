@@ -4,11 +4,13 @@ from html import unescape
 
 
 POS = {
-    "investment": 6,
-    "invest": 5,
-    "investing": 5,
+    "investment": 5,
+    "invest": 4,
+    "investing": 4,
     "investment plan": 10,
     "investment package": 10,
+    "investment program": 9,
+    "investment opportunity": 9,
     "minimum investment": 9,
     "investment amount": 8,
     "investment period": 7,
@@ -25,7 +27,6 @@ POS = {
     "guaranteed return": 10,
     "passive income": 8,
     "capital investment": 8,
-    "investment opportunity": 8,
     "invest now": 9,
     "start investing": 9,
     "choose plan": 8,
@@ -58,6 +59,7 @@ POS = {
     "forex": 6,
     "crypto investment": 9,
     "cloud mining": 9,
+    "mining investment": 9,
     "staking": 7,
     "liquidity pool": 7,
     "defi": 7,
@@ -142,6 +144,7 @@ BAD = [
     "domain marketplace",
     "domain broker",
     "parked domain",
+    "parking page",
     "coming soon",
     "under construction",
     "default hosting page",
@@ -150,7 +153,12 @@ BAD = [
 
 
 def _fetch(domain):
-    for scheme in ("https://", "http://"):
+    last_error = ""
+
+    for scheme in (
+        "https://",
+        "http://",
+    ):
         try:
             request = urllib.request.Request(
                 scheme + domain,
@@ -160,7 +168,7 @@ def _fetch(domain):
                         "(Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 "
                         "Chrome/131 Safari/537.36 "
-                        "LD76-Investment-Radar/2.0"
+                        "LD76-Investment-Radar/3.0"
                     ),
                     "Accept": (
                         "text/html,"
@@ -175,19 +183,29 @@ def _fetch(domain):
                 request,
                 timeout=8,
             ) as response:
+
                 content_type = (
                     response.headers.get(
                         "Content-Type",
-                        ""
+                        "",
                     ).lower()
                 )
 
                 if (
                     content_type
-                    and "text" not in content_type
                     and "html" not in content_type
+                    and "text/plain" not in content_type
+                    and "text/" not in content_type
                 ):
-                    return None, ""
+                    return {
+                        "status": "fetch_failed",
+                        "url": None,
+                        "html": "",
+                        "error": (
+                            "Unsupported content type: "
+                            + content_type
+                        ),
+                    }
 
                 html = response.read(
                     800000
@@ -196,12 +214,30 @@ def _fetch(domain):
                     "ignore",
                 )
 
-                return response.geturl(), html
+                if not html.strip():
+                    return {
+                        "status": "fetch_failed",
+                        "url": response.geturl(),
+                        "html": "",
+                        "error": "Empty response",
+                    }
 
-        except Exception:
-            continue
+                return {
+                    "status": "fetched",
+                    "url": response.geturl(),
+                    "html": html,
+                    "error": "",
+                }
 
-    return None, ""
+        except Exception as exc:
+            last_error = str(exc)
+
+    return {
+        "status": "fetch_failed",
+        "url": None,
+        "html": "",
+        "error": last_error or "Unable to fetch website",
+    }
 
 
 def _text(html):
@@ -221,6 +257,13 @@ def _text(html):
 
     html = re.sub(
         r"<noscript[\s\S]*?</noscript>",
+        " ",
+        html,
+        flags=re.I,
+    )
+
+    html = re.sub(
+        r"<svg[\s\S]*?</svg>",
         " ",
         html,
         flags=re.I,
@@ -286,13 +329,14 @@ def _score(text):
         if item in text
     ]
 
-    score += min(len(pay_hits) * 3, 12)
-    score += min(len(acc_hits) * 2, 8)
+    score += min(
+        len(pay_hits) * 2,
+        10,
+    )
 
-    strong = sum(
-        1
-        for item in hits
-        if POS.get(item, 0) >= 8
+    score += min(
+        len(acc_hits) * 2,
+        8,
     )
 
     investment_family = any(
@@ -303,12 +347,14 @@ def _score(text):
             "invest now",
             "investment plan",
             "investment package",
+            "investment program",
             "profit rate",
             "daily profit",
             "passive income",
             "capital investment",
             "crypto investment",
             "cloud mining",
+            "mining investment",
         )
     )
 
@@ -322,10 +368,17 @@ def _score(text):
         or acc_hits
     )
 
-    if strong >= 1 and investment_family and financial_family:
+    if investment_family:
+        score += 5
+
+    if investment_family and financial_family:
         score += 8
 
-    if investment_family and action_family and financial_family:
+    if (
+        investment_family
+        and action_family
+        and financial_family
+    ):
         score += 8
 
     if (
@@ -364,20 +417,38 @@ def _score(text):
 
 
 def detect_investment(domain):
-    url, html = _fetch(domain)
+    fetched = _fetch(domain)
 
-    if not html:
-        return None
+    if fetched["status"] != "fetched":
+        return {
+            "status": "fetch_failed",
+            "domain": domain,
+            "result": None,
+            "error": fetched["error"],
+        }
+
+    html = fetched["html"]
+    url = fetched["url"]
 
     text = _text(html)
 
     if len(text) < 40:
-        return None
+        return {
+            "status": "rejected",
+            "domain": domain,
+            "result": None,
+            "reason": "Website content too short",
+        }
 
     score, hits = _score(text)
 
     if score < 18:
-        return None
+        return {
+            "status": "rejected",
+            "domain": domain,
+            "result": None,
+            "reason": "Investment score below threshold",
+        }
 
     title = ""
 
@@ -449,7 +520,7 @@ def detect_investment(domain):
             category = name
             break
 
-    return {
+    result = {
         "domain": domain,
         "site_name": title or domain,
         "url": url,
@@ -461,4 +532,10 @@ def detect_investment(domain):
         ),
         "category": category,
         "evidence": hits[:20],
+    }
+
+    return {
+        "status": "matched",
+        "domain": domain,
+        "result": result,
     }
