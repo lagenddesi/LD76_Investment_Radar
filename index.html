@@ -18,7 +18,9 @@
  --border:#26303c
 }
 
-*{box-sizing:border-box}
+*{
+ box-sizing:border-box
+}
 
 body{
  margin:0;
@@ -187,6 +189,11 @@ p{
  margin-top:10px
 }
 
+.primary:disabled{
+ opacity:.6;
+ cursor:not-allowed
+}
+
 .secondary{
  padding:12px;
  border-radius:12px;
@@ -337,7 +344,13 @@ p{
  padding:13px;
  border-radius:12px;
  background:var(--card2);
- margin-top:8px
+ margin-top:8px;
+ font-weight:700
+}
+
+.rdap-button:disabled{
+ opacity:.6;
+ cursor:wait
 }
 
 .rdap-box{
@@ -348,6 +361,39 @@ p{
  overflow:auto;
  font-size:12px;
  white-space:pre-wrap;
+ word-break:break-word;
+ line-height:1.6
+}
+
+.rdap-box.error-box{
+ color:var(--danger)
+}
+
+.rdap-title{
+ font-size:15px;
+ font-weight:800;
+ margin-bottom:10px
+}
+
+.rdap-row{
+ display:flex;
+ flex-direction:column;
+ gap:2px;
+ padding:7px 0;
+ border-bottom:1px solid var(--border)
+}
+
+.rdap-row:last-child{
+ border-bottom:0
+}
+
+.rdap-label{
+ color:var(--muted);
+ font-size:11px;
+ text-transform:uppercase
+}
+
+.rdap-value{
  word-break:break-word
 }
 
@@ -530,7 +576,9 @@ onclick="tld('info')">
 </div>
 </div>
 
-<button class="primary"
+<button
+class="primary"
+id="scanButton"
 onclick="startScan()">
 START SCAN
 </button>
@@ -812,6 +860,14 @@ async function startScan(){
  state.scanning = true;
  state.results = [];
 
+ const button =
+  document.getElementById("scanButton");
+
+ if(button){
+  button.disabled = true;
+  button.textContent = "SCANNING...";
+ }
+
  show("scan");
 
  setProgress(
@@ -843,6 +899,7 @@ async function startScan(){
     "HTTP " + response.status;
 
    try{
+
     const errorData =
      await response.json();
 
@@ -850,6 +907,7 @@ async function startScan(){
      message =
       String(errorData.detail);
     }
+
    }
    catch(_){}
 
@@ -871,15 +929,26 @@ async function startScan(){
     ? data.results
     : [];
 
+  const checked =
+   Number(data.checked || 0);
+
+  const found =
+   Number(data.found || 0);
+
   setProgress(
    100,
-   Number(data.checked || 0),
-   Number(data.found || 0),
+   checked,
+   found,
    data.message ||
-    "Scan completed."
+   "Scan completed."
   );
 
   state.scanning = false;
+
+  if(button){
+   button.disabled = false;
+   button.textContent = "START SCAN";
+  }
 
   renderResults();
 
@@ -892,6 +961,11 @@ async function startScan(){
 
   state.scanning = false;
 
+  if(button){
+   button.disabled = false;
+   button.textContent = "START SCAN";
+  }
+
   setProgress(
    0,
    0,
@@ -903,8 +977,13 @@ async function startScan(){
    "resultsList"
   ).innerHTML =
    '<div class="error">' +
-   esc(error.message || "Scanner failed.") +
+   esc(
+    error.message ||
+    "Scanner failed."
+   ) +
    '</div>';
+
+  show("results");
  }
 }
 
@@ -978,8 +1057,8 @@ function getResultObject(item){
 function getDomain(item){
 
  return (
-  item.domain ||
-  item.result?.domain ||
+  item?.domain ||
+  item?.result?.domain ||
   "Unknown domain"
  );
 }
@@ -1025,8 +1104,10 @@ function getCategory(item){
   item.matched_categories ||
   [];
 
- if(Array.isArray(categories) &&
-    categories.length){
+ if(
+  Array.isArray(categories) &&
+  categories.length
+ ){
 
   return categories[0];
  }
@@ -1068,32 +1149,76 @@ function getEvidence(item){
  }
 
  return evidence
-  .map(item => {
+  .map(value => {
 
-   if(typeof item === "string"){
-    return item;
+   if(typeof value === "string"){
+    return value;
    }
 
    if(
-    item &&
-    typeof item === "object"
+    value &&
+    typeof value === "object"
    ){
 
     const signal =
-     item.signal ||
-     item.phrase ||
-     item.text ||
+     value.signal ||
+     value.phrase ||
+     value.text ||
      "";
 
     const category =
-     item.category ||
+     value.category ||
      "";
 
     if(signal && category){
-     return category + ": " + signal;
+     return (
+      category +
+      ": " +
+      signal
+     );
     }
 
     return signal;
+   }
+
+   return "";
+  })
+  .filter(Boolean);
+}
+
+
+function getNegativeSignals(item){
+
+ const result =
+  getResultObject(item);
+
+ const signals =
+  result.negative_signals ||
+  item.negative_signals ||
+  [];
+
+ if(!Array.isArray(signals)){
+  return [];
+ }
+
+ return signals
+  .map(value => {
+
+   if(typeof value === "string"){
+    return value;
+   }
+
+   if(
+    value &&
+    typeof value === "object"
+   ){
+
+    return (
+     value.signal ||
+     value.phrase ||
+     value.text ||
+     ""
+    );
    }
 
    return "";
@@ -1121,8 +1246,10 @@ function getUrl(item){
    domain &&
    domain !== "Unknown domain"
   ){
+
    url =
-    "https://" + domain;
+    "https://" +
+    domain;
   }
  }
 
@@ -1190,13 +1317,16 @@ function renderResults(){
        </div>
 
        <div>
+
         <span class="badge">
          ${esc(category)}
         </span>
 
         <span class="badge">
-         ${esc(confidence)} Confidence
+         ${esc(confidence)}
+         Confidence
         </span>
+
        </div>
 
        ${
@@ -1242,6 +1372,9 @@ function details(index){
  const evidence =
   getEvidence(item);
 
+ const negatives =
+  getNegativeSignals(item);
+
  const url =
   getUrl(item);
 
@@ -1261,6 +1394,7 @@ function details(index){
      text =>
       `
        <div class="evidence-row">
+
         <span class="evidence-icon">
          ✓
         </span>
@@ -1268,6 +1402,7 @@ function details(index){
         <span class="evidence-text">
          ${esc(text)}
         </span>
+
        </div>
       `
     )
@@ -1280,6 +1415,43 @@ function details(index){
    '<div class="muted">' +
    'No readable evidence returned.' +
    '</div>';
+ }
+
+ let negativeHtml =
+  "";
+
+ if(negatives.length){
+
+  negativeHtml =
+   `
+    <div class="detail-card evidence">
+
+     <h2>Negative Signals</h2>
+
+     ${
+      negatives
+       .map(
+        text =>
+         `
+          <div class="evidence-row">
+
+           <span
+            style="color:var(--danger);font-weight:800">
+            !
+           </span>
+
+           <span class="evidence-text">
+            ${esc(text)}
+           </span>
+
+          </div>
+         `
+       )
+       .join("")
+     }
+
+    </div>
+   `;
  }
 
  const safeUrl =
@@ -1328,7 +1500,8 @@ function details(index){
     <span>
      ${
       safeUrl
-       ? `<a href="${escAttr(safeUrl)}"
+       ? `<a
+          href="${escAttr(safeUrl)}"
           target="_blank"
           rel="noopener">
           ${esc(safeUrl)}
@@ -1364,6 +1537,9 @@ function details(index){
   </div>
 
 
+  ${negativeHtml}
+
+
   ${
    safeUrl
     ? `
@@ -1381,6 +1557,7 @@ function details(index){
 
   <button
    class="rdap-button"
+   id="rdapButton"
    onclick="loadRdap(${JSON.stringify(domain)})">
    RDAP
   </button>
@@ -1392,7 +1569,6 @@ function details(index){
    style="display:none">
   </div>
  `;
-
 }
 
 
@@ -1403,45 +1579,440 @@ async function loadRdap(domain){
    "rdapBox"
   );
 
+ const button =
+  document.getElementById(
+   "rdapButton"
+  );
+
  if(!box){
   return;
  }
 
+ const cleanDomain =
+  String(domain || "")
+   .trim()
+   .toLowerCase();
+
+ if(!cleanDomain){
+
+  box.style.display =
+   "block";
+
+  box.classList.add(
+   "error-box"
+  );
+
+  box.textContent =
+   "RDAP error: domain is missing.";
+
+  return;
+ }
+
+ box.classList.remove(
+  "error-box"
+ );
+
  box.style.display =
   "block";
 
- box.textContent =
-  "Loading RDAP information...";
+ box.innerHTML =
+  '<div class="rdap-title">' +
+  'RDAP Information' +
+  '</div>' +
+  '<div class="muted">' +
+  'Loading information for ' +
+  esc(cleanDomain) +
+  '...' +
+  '</div>';
+
+ if(button){
+
+  button.disabled =
+   true;
+
+  button.textContent =
+   "LOADING RDAP...";
+ }
 
  try{
 
-  const response =
-   await fetch(
-    "/api/rdap?domain=" +
-    encodeURIComponent(domain)
+  const controller =
+   new AbortController();
+
+  const timeout =
+   setTimeout(
+    () => controller.abort(),
+    20000
    );
 
-  const data =
-   await response.json();
+  let response;
 
-  if(!response.ok){
+  try{
 
-   throw new Error(
-    data.detail ||
-    "RDAP request failed."
+   response =
+    await fetch(
+     "/api/rdap?domain=" +
+     encodeURIComponent(
+      cleanDomain
+     ),
+     {
+      method:"GET",
+      headers:{
+       "Accept":
+        "application/json"
+      },
+      cache:"no-store",
+      signal:
+       controller.signal
+     }
+    );
+
+  }
+  finally{
+
+   clearTimeout(
+    timeout
    );
   }
 
-  box.textContent =
-   formatRdap(data);
+  const text =
+   await response.text();
+
+  let data =
+   null;
+
+  try{
+
+   data =
+    JSON.parse(text);
+
+  }
+  catch(_){
+
+   data =
+    null;
+  }
+
+  if(!response.ok){
+
+   const message =
+    data?.error ||
+    data?.detail ||
+    text ||
+    (
+     "HTTP " +
+     response.status
+    );
+
+   throw new Error(
+    "HTTP " +
+    response.status +
+    ": " +
+    message
+   );
+  }
+
+  if(!data){
+
+   throw new Error(
+    "Server returned invalid JSON."
+   );
+  }
+
+  if(data.error){
+
+   box.classList.add(
+    "error-box"
+   );
+
+   box.innerHTML =
+    '<div class="rdap-title">' +
+    'RDAP Error' +
+    '</div>' +
+
+    '<div>' +
+    esc(
+     String(data.error)
+    ) +
+    '</div>' +
+
+    (
+     data.details
+      ? '<div class="muted" ' +
+        'style="margin-top:8px">' +
+        'Details: ' +
+        esc(
+         String(data.details)
+        ) +
+        '</div>'
+      : ""
+    );
+
+   return;
+  }
+
+  box.classList.remove(
+   "error-box"
+  );
+
+  box.innerHTML =
+   formatRdapHtml(
+    data
+   );
 
  }
  catch(error){
 
-  box.textContent =
-   "RDAP unavailable: " +
-   (error.message || "Unknown error");
+  console.error(
+   "RDAP request failed:",
+   error
+  );
+
+  box.classList.add(
+   "error-box"
+  );
+
+  if(
+   error &&
+   error.name === "AbortError"
+  ){
+
+   box.innerHTML =
+    '<div class="rdap-title">' +
+    'RDAP Timeout' +
+    '</div>' +
+
+    '<div>' +
+    'The RDAP server did not respond ' +
+    'within 20 seconds.' +
+    '</div>';
+
+  }
+  else{
+
+   box.innerHTML =
+    '<div class="rdap-title">' +
+    'RDAP Unavailable' +
+    '</div>' +
+
+    '<div>' +
+    esc(
+     String(
+      error?.message ||
+      "Unknown error."
+     )
+    ) +
+    '</div>';
+  }
+
  }
+ finally{
+
+  if(button){
+
+   button.disabled =
+    false;
+
+   button.textContent =
+    "RDAP";
+  }
+ }
+}
+
+
+function formatRdapHtml(data){
+
+ if(!data){
+  return (
+   '<div class="muted">' +
+   'No RDAP information available.' +
+   '</div>'
+  );
+ }
+
+ const rows = [];
+
+ const domain =
+  data.domain ||
+  data.ldhName ||
+  data.name;
+
+ if(domain){
+  rows.push(
+   rdapRow(
+    "Domain",
+    domain
+   )
+  );
+ }
+
+ const registration =
+  data.registration_date ||
+  data.registrationDate ||
+  data.created;
+
+ if(registration){
+  rows.push(
+   rdapRow(
+    "Registration",
+    registration
+   )
+  );
+ }
+ else{
+  rows.push(
+   rdapRow(
+    "Registration",
+    "Unavailable"
+   )
+  );
+ }
+
+ const expiry =
+  data.expiry ||
+  data.expirationDate ||
+  data.expires;
+
+ if(expiry){
+  rows.push(
+   rdapRow(
+    "Expiry",
+    expiry
+   )
+  );
+ }
+ else{
+  rows.push(
+   rdapRow(
+    "Expiry",
+    "Unavailable"
+   )
+  );
+ }
+
+ const changed =
+  data.last_changed ||
+  data.lastChanged;
+
+ if(changed){
+  rows.push(
+   rdapRow(
+    "Last Changed",
+    changed
+   )
+  );
+ }
+
+ const registrar =
+  data.registrar ||
+  data.registrar_name;
+
+ rows.push(
+  rdapRow(
+   "Registrar",
+   registrar ||
+   "Unavailable"
+  )
+ );
+
+ const status =
+  data.status;
+
+ if(Array.isArray(status)){
+
+  rows.push(
+   rdapRow(
+    "Status",
+    status.join(", ")
+   )
+  );
+
+ }
+ else{
+
+  rows.push(
+   rdapRow(
+    "Status",
+    status ||
+    "Unavailable"
+   )
+  );
+ }
+
+ const nameservers =
+  data.nameservers ||
+  data.name_servers;
+
+ if(
+  Array.isArray(nameservers) &&
+  nameservers.length
+ ){
+
+  rows.push(
+   rdapRow(
+    "Nameservers",
+    nameservers.join("\n")
+   )
+  );
+
+ }
+ else{
+
+  rows.push(
+   rdapRow(
+    "Nameservers",
+    "Unavailable"
+   )
+  );
+ }
+
+ if(data.rdap_server){
+
+  rows.push(
+   rdapRow(
+    "RDAP Server",
+    data.rdap_server
+   )
+  );
+ }
+
+ if(data.rdap_url){
+
+  rows.push(
+   rdapRow(
+    "RDAP URL",
+    data.rdap_url
+   )
+  );
+ }
+
+ return (
+  '<div class="rdap-title">' +
+  'RDAP Information' +
+  '</div>' +
+  rows.join("")
+ );
+}
+
+
+function rdapRow(
+ label,
+ value
+){
+
+ return `
+  <div class="rdap-row">
+
+   <span class="rdap-label">
+    ${esc(label)}
+   </span>
+
+   <span class="rdap-value">
+    ${esc(value)}
+   </span>
+
+  </div>
+ `;
 }
 
 
@@ -1464,7 +2035,8 @@ function formatRdap(data){
 
  if(domain){
   lines.push(
-   "Domain: " + domain
+   "Domain: " +
+   domain
   );
  }
 
@@ -1492,6 +2064,17 @@ function formatRdap(data){
   );
  }
 
+ const changed =
+  data.last_changed ||
+  data.lastChanged;
+
+ if(changed){
+  lines.push(
+   "Last Changed: " +
+   changed
+  );
+ }
+
  const registrar =
   data.registrar ||
   data.registrar_name;
@@ -1509,12 +2092,15 @@ function formatRdap(data){
  if(status){
 
   if(Array.isArray(status)){
+
    lines.push(
     "Status: " +
     status.join(", ")
    );
+
   }
   else{
+
    lines.push(
     "Status: " +
     status
@@ -1529,17 +2115,36 @@ function formatRdap(data){
  if(nameservers){
 
   if(Array.isArray(nameservers)){
+
    lines.push(
     "Nameservers: " +
     nameservers.join(", ")
    );
+
   }
   else{
+
    lines.push(
     "Nameservers: " +
     nameservers
    );
   }
+ }
+
+ if(data.rdap_server){
+
+  lines.push(
+   "RDAP Server: " +
+   data.rdap_server
+  );
+ }
+
+ if(data.rdap_url){
+
+  lines.push(
+   "RDAP URL: " +
+   data.rdap_url
+  );
  }
 
  if(lines.length){
@@ -1572,6 +2177,7 @@ function validUrl(value){
 
  }
  catch(_){
+
   return false;
  }
 }
@@ -1630,4 +2236,4 @@ function theme(){
 </script>
 
 </body>
-</html>
+ </html>
