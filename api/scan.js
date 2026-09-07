@@ -5,18 +5,31 @@
  *
  * WEBSITE SCANNER
  *
+ * PURPOSE:
+ * Detect websites that are relevant to:
+ *
+ * - Investment
+ * - Crypto
+ * - Trading
+ * - Forex
+ * - Staking
+ * - Mining
+ * - Profit
+ * - ROI
+ * - Earning
+ * - Income
+ * - Deposit / Withdrawal
+ * - Referral / Affiliate earning
+ *
  * IMPORTANT:
  *
- * discover.js has already verified that the domain
- * was recently registered using RDAP.
+ * PAYMENT METHODS ARE NOT REQUIRED.
  *
- * This scanner now verifies that the domain is also
- * a REAL ACTIVE WEBSITE.
+ * Bank / Easypaisa / JazzCash / Crypto are
+ * evidence only. A website can become a
+ * candidate even when no payment method is found.
  *
- * Parked / for-sale / registrar holding pages are
- * rejected before investment/payment filtering.
- *
- * NO artificial 4/5 candidate limit.
+ * NO ARTIFICIAL CANDIDATE LIMIT.
  */
 
 const CONCURRENCY = 25;
@@ -27,96 +40,178 @@ const MAX_HTML_BYTES = 350000;
 
 const MAX_TEXT_CHARS = 90000;
 
-const MAX_DEEP_PAGES = 8;
+const MAX_DEEP_PAGES = 10;
 
 
 /* =========================================================
- * INVESTMENT / EARNING SIGNALS
+ * PRIMARY INVESTMENT / FINANCIAL SIGNALS
  * ========================================================= */
 
 const INVESTMENT_PATTERNS = [
+
+  /* Investment */
   /\binvest\b/i,
   /\binvestment\b/i,
   /\binvesting\b/i,
   /\binvestor\b/i,
   /\binvestors\b/i,
+  /\binvestment\s+plan\b/i,
+  /\binvestment\s+plans\b/i,
+  /\binvestment\s+program\b/i,
+  /\binvestment\s+programs\b/i,
+  /\binvestment\s+opportunity\b/i,
+  /\binvestment\s+opportunities\b/i,
 
-  /\bdeposit\b/i,
-  /\bdeposits\b/i,
-  /\bdeposit\s+funds?\b/i,
-
+  /* Profit */
   /\bprofit\b/i,
   /\bprofits\b/i,
   /\bprofit\s+plan\b/i,
   /\bprofit\s+plans\b/i,
+  /\bprofit\s+rate\b/i,
+  /\bprofit\s+sharing\b/i,
 
-  /\breturn\b/i,
-  /\breturns\b/i,
-  /\breturn\s+on\s+investment\b/i,
-
+  /* ROI / Returns */
   /\broi\b/i,
+  /\breturn\s+on\s+investment\b/i,
+  /\breturn\s+rate\b/i,
+  /\breturns?\b/i,
+  /\bpercentage\s+return\b/i,
 
+  /* Earnings */
+  /\bearn\b/i,
   /\bearning\b/i,
   /\bearnings\b/i,
-  /\bearn\b/i,
+  /\bearning\s+plan\b/i,
+  /\bearning\s+plans\b/i,
+  /\bearning\s+program\b/i,
+  /\bmake\s+money\b/i,
+  /\bmake\s+income\b/i,
 
+  /* Income */
   /\bincome\b/i,
   /\bpassive\s+income\b/i,
   /\bpassive\s+earning\b/i,
   /\bpassive\s+earnings\b/i,
+  /\bpassive\s+income\s+stream\b/i,
 
+  /* Deposit / withdrawal */
+  /\bdeposit\b/i,
+  /\bdeposits\b/i,
+  /\bdeposit\s+funds?\b/i,
+  /\bdeposit\s+money\b/i,
   /\bwithdraw\b/i,
   /\bwithdrawal\b/i,
   /\bwithdrawals\b/i,
+  /\bwithdraw\s+funds?\b/i,
 
-  /\bmaturity\b/i,
+  /* Trading */
+  /\btrade\b/i,
+  /\btrading\b/i,
+  /\btrader\b/i,
+  /\btraders\b/i,
+  /\btrading\s+platform\b/i,
+  /\btrading\s+account\b/i,
+  /\btrading\s+signals?\b/i,
+  /\bcopy\s+trading\b/i,
+  /\bautomated\s+trading\b/i,
 
-  /\binvestment\s+plan\b/i,
-  /\binvestment\s+plans\b/i,
+  /* Forex */
+  /\bforex\b/i,
+  /\bforex\s+trading\b/i,
+  /\bforex\s+broker\b/i,
+  /\bforex\s+signals?\b/i,
 
-  /\bearning\s+plan\b/i,
-  /\bearning\s+plans\b/i,
+  /* Crypto */
+  /\bcrypto\b/i,
+  /\bcryptocurrency\b/i,
+  /\bcrypto\s+investment\b/i,
+  /\bcrypto\s+investing\b/i,
+  /\bcrypto\s+trading\b/i,
+  /\bcrypto\s+earning\b/i,
+  /\bcrypto\s+staking\b/i,
 
-  /\bprofit\s+rate\b/i,
-  /\breturn\s+rate\b/i,
+  /* Bitcoin / coins */
+  /\bbitcoin\b/i,
+  /\bbtc\b/i,
+  /\bethereum\b/i,
+  /\beth\b/i,
+  /\busdt\b/i,
+  /\busdc\b/i,
+  /\baltcoin\b/i,
+  /\baltcoins\b/i,
+  /\bcoin\b/i,
+  /\btoken\b/i,
+  /\btokens\b/i,
 
+  /* DeFi */
+  /\bdefi\b/i,
+  /\bdecentralized\s+finance\b/i,
+  /\bliquidity\s+pool\b/i,
+  /\bliquidity\s+mining\b/i,
+
+  /* Staking */
+  /\bstake\b/i,
+  /\bstaking\b/i,
+  /\bstaking\s+rewards?\b/i,
+  /\bstaking\s+income\b/i,
+  /\bstaking\s+profit\b/i,
+
+  /* Mining */
+  /\bmine\b/i,
+  /\bmining\b/i,
+  /\bcrypto\s+mining\b/i,
+  /\bbitcoin\s+mining\b/i,
+  /\bcloud\s+mining\b/i,
+  /\bmining\s+profit\b/i,
+
+  /* Yield */
+  /\byield\b/i,
+  /\byield\s+farming\b/i,
+  /\bhigh\s+yield\b/i,
+  /\bhigh\s+yield\s+investment\b/i,
+
+  /* Funds / finance */
+  /\bwealth\b/i,
+  /\bwealth\s+management\b/i,
+  /\bcapital\b/i,
+  /\bcapital\s+investment\b/i,
+  /\bportfolio\b/i,
+  /\bportfolio\s+management\b/i,
+  /\basset\s+management\b/i,
+  /\binvestment\s+fund\b/i,
+  /\binvestment\s+funds\b/i,
+  /\bfinancial\s+freedom\b/i,
+
+  /* Referral / affiliate earning */
   /\breferral\b/i,
+  /\breferrals\b/i,
+  /\breferral\s+bonus\b/i,
   /\baffiliate\b/i,
+  /\baffiliate\s+program\b/i,
+  /\baffiliate\s+commission\b/i,
   /\bcommission\b/i,
-
   /\binvite\s+and\s+earn\b/i,
   /\bteam\s+income\b/i,
   /\bteam\s+bonus\b/i,
 
+  /* Bonus / rewards */
   /\bbonus\b/i,
   /\breward\b/i,
-
-  /\bmake\s+money\b/i,
-  /\bget\s+paid\b/i,
-  /\bfinancial\s+freedom\b/i,
-
-  /\btrading\b/i,
-  /\bforex\b/i,
-  /\bforex\s+trading\b/i,
-
-  /\bstaking\b/i,
-  /\byield\b/i,
-
-  /\bcrypto\s+investment\b/i,
-  /\bcrypto\s+earning\b/i,
-
-  /\bwealth\b/i,
-  /\bcapital\b/i,
-  /\bportfolio\b/i,
-  /\bfund\b/i,
-  /\bfunds\b/i,
-  /\basset\s+management\b/i
+  /\brewards\b/i,
+  /\bdeposit\s+bonus\b/i,
+  /\bwelcome\s+bonus\b/i
 ];
 
 
+/* =========================================================
+ * STRONG FINANCIAL CLAIMS
+ * ========================================================= */
+
 const DAILY_RETURN_PATTERNS = [
+
   /\b\d+(?:\.\d+)?\s*%\s*(?:per\s*)?day\b/i,
   /\b\d+(?:\.\d+)?\s*%\s*daily\b/i,
+  /\b\d+(?:\.\d+)?\s*%\s*per\s*day\b/i,
 
   /\bdaily\s+profit\b/i,
   /\bdaily\s+return\b/i,
@@ -124,10 +219,10 @@ const DAILY_RETURN_PATTERNS = [
   /\bdaily\s+earning\b/i,
   /\bdaily\s+earnings\b/i,
 
-  /\b\d+(?:\.\d+)?\s*%\s*per\s*week\b/i,
+  /\b\d+(?:\.\d+)?\s*%\s*(?:per\s*)?week\b/i,
   /\b\d+(?:\.\d+)?\s*%\s*weekly\b/i,
 
-  /\b\d+(?:\.\d+)?\s*%\s*per\s*month\b/i,
+  /\b\d+(?:\.\d+)?\s*%\s*(?:per\s*)?month\b/i,
   /\b\d+(?:\.\d+)?\s*%\s*monthly\b/i,
 
   /\bprofit\s+of\s+\d+(?:\.\d+)?\s*%\b/i,
@@ -136,28 +231,41 @@ const DAILY_RETURN_PATTERNS = [
   /\bguaranteed\s+profit\b/i,
   /\bguaranteed\s+return\b/i,
   /\bguaranteed\s+income\b/i,
+  /\bguaranteed\s+earning\b/i,
 
   /\bfixed\s+profit\b/i,
   /\bfixed\s+return\b/i,
-  /\bfixed\s+income\b/i
+  /\bfixed\s+income\b/i,
+
+  /\bhigh\s+profit\b/i,
+  /\bhigh\s+return\b/i,
+  /\bhigh\s+income\b/i
 ];
 
 
 const ROI_PATTERNS = [
+
   /\broi\b/i,
   /\breturn\s+on\s+investment\b/i,
   /\bprofit\s+rate\b/i,
   /\breturn\s+rate\b/i,
   /\bpercentage\s+return\b/i,
-  /\b\d+(?:\.\d+)?\s*%\s*(?:roi|return|profit)\b/i
+
+  /\b\d+(?:\.\d+)?\s*%\s*(?:roi|return|profit)\b/i,
+
+  /\bup\s+to\s+\d+(?:\.\d+)?\s*%\b/i
 ];
 
 
 /* =========================================================
  * PAYMENT METHODS
+ *
+ * These are EVIDENCE only.
+ * They DO NOT decide whether a domain is a candidate.
  * ========================================================= */
 
 const PAYMENT_PATTERNS = {
+
   bank: [
     /\bbank\s+transfer\b/i,
     /\bbank\s+deposit\b/i,
@@ -228,9 +336,11 @@ const PAYMENT_PATTERNS = {
  * ========================================================= */
 
 const PARKED_PATTERNS = [
+
   /\bdomain\s+for\s+sale\b/i,
   /\bthis\s+domain\s+is\s+for\s+sale\b/i,
   /\bthis\s+domain\s+is\s+available\s+for\s+purchase\b/i,
+
   /\bbuy\s+(?:this\s+)?domain\b/i,
   /\bbuy\s+domain\b/i,
   /\bpurchase\s+(?:this\s+)?domain\b/i,
@@ -240,9 +350,6 @@ const PARKED_PATTERNS = [
   /\bparked\s+domain\b/i,
   /\bdomain\s+parking\b/i,
   /\bpark\s+this\s+domain\b/i,
-
-  /\bcoming\s+soon\b/i,
-  /\bunder\s+construction\b/i,
 
   /\bmake\s+an\s+offer\s+for\s+this\s+domain\b/i,
   /\bmake\s+offer\b/i,
@@ -259,9 +366,6 @@ const PARKED_PATTERNS = [
   /\bdan\.com\b/i,
   /\bgodaddy\s+domain\b/i,
   /\bnamecheap\s+marketplace\b/i,
-
-  /\bhuge\s+domains\b/i,
-  /\bdomains\s+available\b/i,
 
   /\bparkingcrew\b/i,
   /\bparking\s+crew\b/i,
@@ -281,10 +385,11 @@ const PARKED_URL_PATTERNS = [
 
 
 /* =========================================================
- * RELEVANT DEEP PAGES
+ * DEEP-SCAN PATHS
  * ========================================================= */
 
 const RELEVANT_PATHS = [
+
   "/about",
   "/about-us",
   "/company",
@@ -334,6 +439,20 @@ const RELEVANT_PATHS = [
   "/withdrawal",
   "/withdrawals",
 
+  "/trading",
+  "/trade",
+  "/forex",
+
+  "/crypto",
+  "/cryptocurrency",
+
+  "/staking",
+  "/mining",
+
+  "/portfolio",
+  "/fund",
+  "/funds",
+
   "/payment",
   "/payments",
 
@@ -351,35 +470,32 @@ const RELEVANT_PATHS = [
  * MAIN HANDLER
  * ========================================================= */
 
-export default async function handler(
-  req,
-  res
-) {
+export default async function handler(req, res) {
+
   if (req.method !== "POST") {
     return res.status(405).json({
       ok: false,
-      error:
-        "Method not allowed. Use POST."
+      error: "Method not allowed. Use POST."
     });
   }
 
   try {
-    const body =
-      req.body || {};
+
+    const body = req.body || {};
 
     const rawDomains =
       Array.isArray(body.domains)
         ? body.domains
         : [];
 
-    const selectedPayments =
-      normalizePayments(
-        body.paymentMethods
-      );
-
     /*
-     * NEVER LIMIT TO 4 OR 5.
+     * Payment selections are retained for
+     * reporting compatibility.
+     *
+     * They are NOT used as candidate gate.
      */
+    const selectedPayments =
+      normalizePayments(body.paymentMethods);
 
     const domains =
       uniqueDomains(
@@ -389,6 +505,7 @@ export default async function handler(
       );
 
     if (!domains.length) {
+
       return res.status(200).json({
         ok: true,
 
@@ -404,36 +521,43 @@ export default async function handler(
 
         paymentMatches: 0,
 
-        candidates: []
+        candidates: [],
+
+        selectedPayments
       });
     }
 
+
     const results = [];
+
 
     await runWithConcurrency(
       domains,
       CONCURRENCY,
       async item => {
+
         try {
+
           const result =
             await scanDomain(item);
 
           results.push(result);
+
         } catch (error) {
+
           results.push({
-            domain:
-              item.domain,
+
+            domain: item.domain,
 
             registeredAt:
-              item.registeredAt ||
-              null,
+              item.registeredAt || null,
 
             registrationVerified:
-              item.registrationVerified ===
-              true,
+              item.registrationVerified === true,
 
-            status:
-              "error",
+            status: "error",
+
+            websiteType: "scanner-error",
 
             errors: [
               error?.message ||
@@ -448,8 +572,7 @@ export default async function handler(
     const active =
       results.filter(
         item =>
-          item.status ===
-          "active"
+          item.status === "active"
       );
 
 
@@ -469,12 +592,26 @@ export default async function handler(
       );
 
 
+    /*
+     * =====================================================
+     * PRIMARY CANDIDATE FILTER
+     * =====================================================
+     *
+     * PAYMENT IS NOT REQUIRED.
+     *
+     * Investment relevance alone is enough.
+     */
+
     const investmentMatches =
       realActiveWebsites.filter(
         item =>
-          item.investment?.relevant
+          item.investment?.relevant === true
       );
 
+
+    /*
+     * Payment matches are now only statistics.
+     */
 
     const paymentMatches =
       investmentMatches.filter(
@@ -487,18 +624,30 @@ export default async function handler(
 
 
     /*
-     * NO candidate limit.
+     * NO artificial candidate limit.
+     *
+     * 3 candidates -> 3
+     * 20 candidates -> 20
+     * 100 candidates -> 100
      */
 
     const candidates =
-      paymentMatches.sort(
-        (a, b) =>
-          (b.investment?.score || 0) -
-          (a.investment?.score || 0)
+      investmentMatches.sort(
+        (a, b) => {
+
+          const scoreA =
+            a.investment?.score || 0;
+
+          const scoreB =
+            b.investment?.score || 0;
+
+          return scoreB - scoreA;
+        }
       );
 
 
     return res.status(200).json({
+
       ok: true,
 
       scanned:
@@ -518,16 +667,33 @@ export default async function handler(
       paymentMatches:
         paymentMatches.length,
 
-      candidates
+      /*
+       * Useful diagnostic counters.
+       */
+      noPaymentCandidates:
+        investmentMatches.filter(
+          item =>
+            !hasSelectedPayment(
+              item.paymentMethods,
+              selectedPayments
+            )
+        ).length,
+
+      candidates,
+
+      selectedPayments
     });
 
+
   } catch (error) {
+
     console.error(
       "LD76 scan error:",
       error
     );
 
     return res.status(500).json({
+
       ok: false,
 
       error:
@@ -545,15 +711,16 @@ export default async function handler(
  * DOMAIN SCANNER
  * ========================================================= */
 
-async function scanDomain(
-  input
-) {
+async function scanDomain(input) {
+
   const domain =
     normalizeDomain(
       input?.domain
     );
 
+
   const result = {
+
     domain,
 
     registeredAt:
@@ -561,8 +728,7 @@ async function scanDomain(
       null,
 
     registrationVerified:
-      input?.registrationVerified ===
-      true,
+      input?.registrationVerified === true,
 
     registrationSource:
       input?.registrationSource ||
@@ -615,6 +781,7 @@ async function scanDomain(
       [],
 
     investment: {
+
       relevant:
         false,
 
@@ -628,10 +795,20 @@ async function scanDomain(
         [],
 
       roiClaims:
-        []
+        [],
+
+      signalGroups:
+        [],
+
+      primarySignalCount:
+        0,
+
+      strongSignalCount:
+        0
     },
 
     paymentMethods: {
+
       bank:
         false,
 
@@ -649,6 +826,7 @@ async function scanDomain(
     },
 
     transparency: {
+
       company:
         [],
 
@@ -663,6 +841,7 @@ async function scanDomain(
     },
 
     technical: {
+
       https:
         true,
 
@@ -679,6 +858,7 @@ async function scanDomain(
 
 
   if (!domain) {
+
     result.errors.push(
       "Invalid domain"
     );
@@ -688,17 +868,13 @@ async function scanDomain(
 
 
   /*
-   * Registration verification is expected
-   * from discover.js.
-   *
-   * Do not allow unverified domains through
-   * if this endpoint is called manually.
+   * Registration verification is mandatory.
    */
 
   if (
-    input?.registrationVerified !==
-    true
+    input?.registrationVerified !== true
   ) {
+
     result.errors.push(
       "Domain registration is not verified"
     );
@@ -710,9 +886,9 @@ async function scanDomain(
   }
 
 
-  /* ---------------------------------------------
+  /* =====================================================
    * HOMEPAGE
-   * ------------------------------------------- */
+   * ===================================================== */
 
   let page =
     await fetchPage(
@@ -720,9 +896,8 @@ async function scanDomain(
     );
 
 
-  if (
-    !page.hasContent
-  ) {
+  if (!page.hasContent) {
+
     page =
       await fetchPage(
         `http://${domain}/`
@@ -730,9 +905,8 @@ async function scanDomain(
   }
 
 
-  if (
-    !page.hasContent
-  ) {
+  if (!page.hasContent) {
+
     result.errors =
       [page.error]
         .filter(Boolean);
@@ -762,6 +936,7 @@ async function scanDomain(
 
 
   result.technical = {
+
     https:
       result.https,
 
@@ -773,9 +948,9 @@ async function scanDomain(
   };
 
 
-  /* ---------------------------------------------
+  /* =====================================================
    * BASIC PAGE DATA
-   * ------------------------------------------- */
+   * ===================================================== */
 
   result.title =
     extractTitle(
@@ -792,24 +967,23 @@ async function scanDomain(
     );
 
 
-  /*
-   * Inspect raw HTML + visible text + URLs.
-   */
-
   const rawText =
     normalizeForSearch(
       page.text
     );
+
 
   const visibleText =
     extractUsefulText(
       page.text
     );
 
+
   const linksText =
     extractAllLinksAsText(
       page.text
     );
+
 
   const combined =
     truncateText(
@@ -822,9 +996,9 @@ async function scanDomain(
     );
 
 
-  /* ---------------------------------------------
+  /* =====================================================
    * PARKED / FOR-SALE GATE
-   * ------------------------------------------- */
+   * ===================================================== */
 
   const parkedAnalysis =
     detectParkedPage(
@@ -839,9 +1013,8 @@ async function scanDomain(
     parkedAnalysis;
 
 
-  if (
-    parkedAnalysis.isParked
-  ) {
+  if (parkedAnalysis.isParked) {
+
     result.websiteType =
       "parked-or-for-sale";
 
@@ -856,10 +1029,9 @@ async function scanDomain(
   }
 
 
-  /*
-   * If the homepage is extremely empty,
-   * don't call it a real active site.
-   */
+  /* =====================================================
+   * EMPTY WEBSITE GATE
+   * ===================================================== */
 
   if (
     isEssentiallyEmptyWebsite(
@@ -867,6 +1039,7 @@ async function scanDomain(
       result.title
     )
   ) {
+
     result.websiteType =
       "empty-or-placeholder";
 
@@ -885,9 +1058,9 @@ async function scanDomain(
     "real-active-website";
 
 
-  /* ---------------------------------------------
+  /* =====================================================
    * INITIAL ANALYSIS
-   * ------------------------------------------- */
+   * ===================================================== */
 
   analyzeInvestment(
     result,
@@ -904,6 +1077,7 @@ async function scanDomain(
     combined
   );
 
+
   result.content =
     truncateText(
       combined,
@@ -911,20 +1085,36 @@ async function scanDomain(
     );
 
 
-  /* ---------------------------------------------
+  result.snippets.push(
+    ...collectSignalSnippets(
+      combined
+    )
+  );
+
+
+  /* =====================================================
    * DEEP SCAN
-   * ------------------------------------------- */
+   *
+   * IMPORTANT:
+   *
+   * Deep scan is triggered by investment/financial
+   * signals OR detected payment evidence.
+   *
+   * Payment is NOT required.
+   * ===================================================== */
 
   if (
     result.investment.relevant ||
     result.paymentMethods.detected.length
   ) {
+
     const links =
       extractPageLinks(
         page.text,
         result.finalUrl ||
         `https://${domain}/`
       );
+
 
     const selectedLinks =
       selectRelevantPages(
@@ -939,36 +1129,42 @@ async function scanDomain(
       const url
       of selectedLinks
     ) {
+
       if (
-        result.pagesChecked
-          .includes(url)
+        result.pagesChecked.includes(
+          url
+        )
       ) {
         continue;
       }
+
 
       const child =
         await fetchPage(url);
 
-      if (
-        !child.hasContent
-      ) {
+
+      if (!child.hasContent) {
         continue;
       }
+
 
       const childText =
         normalizeForSearch(
           child.text
         );
 
+
       const childVisible =
         extractUsefulText(
           child.text
         );
 
+
       const childLinks =
         extractAllLinksAsText(
           child.text
         );
+
 
       const childCombined =
         truncateText(
@@ -977,25 +1173,26 @@ async function scanDomain(
             childVisible,
             childLinks
           ].join("\n"),
-          20000
+          25000
         );
 
 
       /*
-       * A deep page saying "buy this domain"
-       * does not mean the homepage is parked,
-       * but if the page is clearly a marketplace
-       * page, don't use it as investment evidence.
+       * Ignore marketplace / parked child pages.
        */
 
-      if (
+      const childParked =
         detectParkedPage(
           child,
           childCombined,
           child.finalUrl,
-          extractTitle(child.text)
-        ).isParked
-      ) {
+          extractTitle(
+            child.text
+          )
+        );
+
+
+      if (childParked.isParked) {
         continue;
       }
 
@@ -1003,6 +1200,7 @@ async function scanDomain(
       result.pagesChecked.push(
         url
       );
+
 
       result.content +=
         "\n\n--- PAGE: " +
@@ -1016,10 +1214,12 @@ async function scanDomain(
         childCombined
       );
 
+
       analyzePayments(
         result,
         childCombined
       );
+
 
       analyzeTransparency(
         result,
@@ -1027,13 +1227,10 @@ async function scanDomain(
       );
 
 
-      const childSnippets =
-        collectSignalSnippets(
-          childCombined
-        );
-
       result.snippets.push(
-        ...childSnippets
+        ...collectSignalSnippets(
+          childCombined
+        )
       );
     }
   }
@@ -1051,7 +1248,7 @@ async function scanDomain(
       result.snippets
     ).slice(
       0,
-      30
+      40
     );
 
 
@@ -1062,21 +1259,72 @@ async function scanDomain(
 
 
   /*
-   * Recalculate relevance after deep scan.
+   * Recalculate after deep scan.
    */
 
   result.investment.relevant =
-    result.investment.score >=
-      10;
+    isInvestmentCandidate(
+      result.investment
+    );
 
 
   result.transparency.candidate =
     result.investment.relevant ||
-    result.paymentMethods.detected.length >
-      0;
+    result.paymentMethods.detected.length > 0;
 
 
   return result;
+}
+
+
+/* =========================================================
+ * INVESTMENT CANDIDATE DECISION
+ * ========================================================= */
+
+function isInvestmentCandidate(
+  investment
+) {
+
+  if (!investment) {
+    return false;
+  }
+
+
+  /*
+   * Any strong financial signal is enough.
+   */
+
+  if (
+    investment.strongSignalCount > 0
+  ) {
+    return true;
+  }
+
+
+  /*
+   * Multiple primary financial signals
+   * are strong evidence.
+   */
+
+  if (
+    investment.primarySignalCount >= 2
+  ) {
+    return true;
+  }
+
+
+  /*
+   * A high combined score also qualifies.
+   */
+
+  if (
+    investment.score >= 8
+  ) {
+    return true;
+  }
+
+
+  return false;
 }
 
 
@@ -1090,6 +1338,7 @@ function detectParkedPage(
   finalUrl,
   title
 ) {
+
   const text =
     [
       combined || "",
@@ -1098,18 +1347,19 @@ function detectParkedPage(
     ].join("\n");
 
 
-  const matches =
-    [];
+  const matches = [];
 
 
   for (
     const pattern
     of PARKED_PATTERNS
   ) {
+
     const match =
       text.match(pattern);
 
     if (match) {
+
       matches.push(
         match[0]
       );
@@ -1121,31 +1371,36 @@ function detectParkedPage(
     const pattern
     of PARKED_URL_PATTERNS
   ) {
+
     if (
       pattern.test(
-        String(finalUrl || "")
+        String(
+          finalUrl || ""
+        )
       )
     ) {
+
       matches.push(
-        String(finalUrl)
+        String(
+          finalUrl
+        )
       );
     }
   }
 
 
-  /*
-   * Strong indicators immediately reject.
-   */
-
   const strong =
-    matches.some(value =>
-      /for sale|buy domain|parked|domain parking|sedo|afternic|dan\.com|domain auction/i
-        .test(value)
+    matches.some(
+      value =>
+        /for sale|buy domain|parked|domain parking|sedo|afternic|dan\.com|domain auction/i
+          .test(value)
     );
 
 
   if (strong) {
+
     return {
+
       isParked:
         true,
 
@@ -1153,19 +1408,15 @@ function detectParkedPage(
         "high",
 
       matches:
-        uniqueStrings(matches),
+        uniqueStrings(
+          matches
+        ),
 
       reason:
         "Parked or for-sale domain page detected"
     };
   }
 
-
-  /*
-   * "Coming soon" alone is weaker.
-   * Only reject when content is otherwise
-   * essentially empty.
-   */
 
   if (
     matches.length &&
@@ -1177,7 +1428,9 @@ function detectParkedPage(
       title
     )
   ) {
+
     return {
+
       isParked:
         true,
 
@@ -1185,7 +1438,9 @@ function detectParkedPage(
         "medium",
 
       matches:
-        uniqueStrings(matches),
+        uniqueStrings(
+          matches
+        ),
 
       reason:
         "Placeholder/coming-soon website detected"
@@ -1194,6 +1449,7 @@ function detectParkedPage(
 
 
   return {
+
     isParked:
       false,
 
@@ -1214,9 +1470,13 @@ function isEssentiallyEmptyWebsite(
   text,
   title
 ) {
+
   const cleaned =
     String(text || "")
-      .replace(/\s+/g, " ")
+      .replace(
+        /\s+/g,
+        " "
+      )
       .trim();
 
 
@@ -1258,82 +1518,212 @@ function analyzeInvestment(
   result,
   text
 ) {
+
   const value =
     String(text || "");
 
+
+  let matchedPrimary =
+    0;
+
+  let matchedStrong =
+    0;
+
+
+  /*
+   * Primary signals
+   */
 
   for (
     const pattern
     of INVESTMENT_PATTERNS
   ) {
+
     const match =
       value.match(pattern);
 
-    if (match) {
-      const keyword =
-        match[0].trim();
-
-      if (
-        !result.investment.keywords
-          .includes(keyword)
-      ) {
-        result.investment.keywords.push(
-          keyword
-        );
-      }
-
-      result.investment.score +=
-        keywordWeight(
-          keyword
-        );
+    if (!match) {
+      continue;
     }
+
+
+    const keyword =
+      match[0].trim();
+
+
+    if (
+      !result.investment.keywords.includes(
+        keyword
+      )
+    ) {
+
+      result.investment.keywords.push(
+        keyword
+      );
+
+      matchedPrimary++;
+    }
+
+
+    const weight =
+      keywordWeight(
+        keyword
+      );
+
+
+    result.investment.score +=
+      weight;
   }
 
+
+  /*
+   * Daily / guaranteed / high-return signals
+   */
 
   for (
     const pattern
     of DAILY_RETURN_PATTERNS
   ) {
+
     const matches =
       value.match(
         new RegExp(
           pattern.source,
-          pattern.flags + "g"
+          pattern.flags.includes("g")
+            ? pattern.flags
+            : pattern.flags + "g"
         )
       );
 
-    if (matches) {
-      result.investment.score +=
-        15;
 
-      result.investment.dailyReturnClaims.push(
-        ...matches
-      );
+    if (!matches) {
+      continue;
     }
+
+
+    matchedStrong +=
+      matches.length;
+
+
+    result.investment.score +=
+      15;
+
+
+    result.investment.dailyReturnClaims.push(
+      ...matches
+    );
   }
 
+
+  /*
+   * ROI signals
+   */
 
   for (
     const pattern
     of ROI_PATTERNS
   ) {
+
     const matches =
       value.match(
         new RegExp(
           pattern.source,
-          pattern.flags + "g"
+          pattern.flags.includes("g")
+            ? pattern.flags
+            : pattern.flags + "g"
         )
       );
 
-    if (matches) {
-      result.investment.score +=
-        15;
 
-      result.investment.roiClaims.push(
-        ...matches
-      );
+    if (!matches) {
+      continue;
     }
+
+
+    matchedStrong +=
+      matches.length;
+
+
+    result.investment.score +=
+      10;
+
+
+    result.investment.roiClaims.push(
+      ...matches
+    );
   }
+
+
+  result.investment.primarySignalCount +=
+    matchedPrimary;
+
+
+  result.investment.strongSignalCount +=
+    matchedStrong;
+
+
+  /*
+   * Signal groups
+   */
+
+  const lower =
+    value.toLowerCase();
+
+
+  const groups = {
+
+    investment:
+      /\binvest|investment|investing|investor/i
+        .test(lower),
+
+    crypto:
+      /\bcrypto|cryptocurrency|bitcoin|btc|ethereum|usdt|usdc|defi|token\b/i
+        .test(lower),
+
+    trading:
+      /\btrading|trader|forex|copy trading|trade\b/i
+        .test(lower),
+
+    profit:
+      /\bprofit|profits|yield|return|roi\b/i
+        .test(lower),
+
+    earning:
+      /\bearn|earning|earnings|income|passive income\b/i
+        .test(lower),
+
+    deposit:
+      /\bdeposit|deposits|deposit funds?\b/i
+        .test(lower),
+
+    withdrawal:
+      /\bwithdraw|withdrawal|withdrawals\b/i
+        .test(lower),
+
+    referral:
+      /\breferral|affiliate|commission|invite and earn\b/i
+        .test(lower),
+
+    staking:
+      /\bstake|staking|staking rewards?\b/i
+        .test(lower),
+
+    mining:
+      /\bmining|crypto mining|cloud mining\b/i
+        .test(lower)
+  };
+
+
+  result.investment.signalGroups =
+    Object.entries(groups)
+      .filter(
+        ([, matched]) =>
+          matched
+      )
+      .map(
+        ([name]) =>
+          name
+      );
 
 
   result.investment.keywords =
@@ -1341,10 +1731,12 @@ function analyzeInvestment(
       result.investment.keywords
     );
 
+
   result.investment.dailyReturnClaims =
     uniqueStrings(
       result.investment.dailyReturnClaims
     );
+
 
   result.investment.roiClaims =
     uniqueStrings(
@@ -1360,33 +1752,62 @@ function analyzeInvestment(
 
 
   result.investment.relevant =
-    result.investment.score >=
-      10;
+    isInvestmentCandidate(
+      result.investment
+    );
 }
 
+
+/* =========================================================
+ * KEYWORD WEIGHTS
+ * ========================================================= */
 
 function keywordWeight(
   keyword
 ) {
+
   const value =
-    String(keyword)
+    String(keyword || "")
       .toLowerCase();
 
+
+  /*
+   * Strongest core signals.
+   */
+
   if (
-    /daily|profit|return|roi|investment|deposit|withdraw/i
+    /investment|investing|investor|crypto|cryptocurrency|trading|forex|staking|staking|mining|roi/i
       .test(value)
   ) {
-    return 10;
+    return 8;
   }
+
+
+  /*
+   * Strong financial activity.
+   */
+
+  if (
+    /profit|return|yield|earning|earnings|income|deposit|withdraw/i
+      .test(value)
+  ) {
+    return 6;
+  }
+
+
+  /*
+   * Supporting monetization signals.
+   */
 
   if (
     /referral|affiliate|commission|bonus|reward/i
       .test(value)
   ) {
-    return 5;
+    return 3;
   }
 
-  return 3;
+
+  return 2;
 }
 
 
@@ -1398,6 +1819,7 @@ function analyzePayments(
   result,
   text
 ) {
+
   const value =
     String(text || "");
 
@@ -1408,13 +1830,16 @@ function analyzePayments(
       PAYMENT_PATTERNS
     )
   ) {
+
     for (
       const pattern
       of patterns
     ) {
+
       if (
         pattern.test(value)
       ) {
+
         result.paymentMethods[method] =
           true;
 
@@ -1436,9 +1861,11 @@ function analyzePayments(
       "crypto"
     ]
   ) {
+
     if (
       result.paymentMethods[method]
     ) {
+
       detected.push(
         method
       );
@@ -1453,18 +1880,24 @@ function analyzePayments(
 
 /* =========================================================
  * SELECTED PAYMENT FILTER
+ *
+ * Kept only for reporting compatibility.
+ * It does NOT control candidate selection.
  * ========================================================= */
 
 function normalizePayments(
   value
 ) {
+
   if (!Array.isArray(value)) {
+
     return [
       "bank",
       "easypaisa",
       "jazzcash"
     ];
   }
+
 
   const allowed =
     new Set([
@@ -1474,15 +1907,18 @@ function normalizePayments(
       "crypto"
     ]);
 
+
   return uniqueStrings(
     value
-      .map(item =>
-        String(item)
-          .trim()
-          .toLowerCase()
+      .map(
+        item =>
+          String(item)
+            .trim()
+            .toLowerCase()
       )
-      .filter(item =>
-        allowed.has(item)
+      .filter(
+        item =>
+          allowed.has(item)
       )
   );
 }
@@ -1492,12 +1928,17 @@ function hasSelectedPayment(
   paymentMethods,
   selectedPayments
 ) {
+
   if (
-    !Array.isArray(selectedPayments) ||
+    !Array.isArray(
+      selectedPayments
+    ) ||
     !selectedPayments.length
   ) {
+
     return false;
   }
+
 
   return selectedPayments.some(
     method =>
@@ -1515,15 +1956,17 @@ function analyzeTransparency(
   result,
   text
 ) {
+
   const value =
     String(text || "")
       .toLowerCase();
 
 
   if (
-    /company|about us|who we are|our team|management|head office|registered office/i
+    /company|about us|who we are|our team|management|head office|registered office|company registration/i
       .test(value)
   ) {
+
     result.transparency.company.push(
       "Company/business information detected"
     );
@@ -1531,9 +1974,10 @@ function analyzeTransparency(
 
 
   if (
-    /privacy policy|terms and conditions|terms of service|legal notice|refund policy|risk disclosure/i
+    /privacy policy|terms and conditions|terms of service|legal notice|refund policy|risk disclosure|legal disclaimer/i
       .test(value)
   ) {
+
     result.transparency.legal.push(
       "Legal/privacy information detected"
     );
@@ -1541,9 +1985,10 @@ function analyzeTransparency(
 
 
   if (
-    /contact us|support|customer service|email us|live chat|telegram|whatsapp|discord/i
+    /contact us|support|customer service|email us|live chat|telegram|whatsapp|discord|ticket support/i
       .test(value)
   ) {
+
     result.transparency.support.push(
       "Support/contact information detected"
     );
@@ -1555,10 +2000,12 @@ function analyzeTransparency(
       result.transparency.company
     );
 
+
   result.transparency.legal =
     uniqueStrings(
       result.transparency.legal
     );
+
 
   result.transparency.support =
     uniqueStrings(
@@ -1574,8 +2021,10 @@ function analyzeTransparency(
 async function fetchPage(
   url
 ) {
+
   const controller =
     new AbortController();
+
 
   const timer =
     setTimeout(
@@ -1586,22 +2035,22 @@ async function fetchPage(
 
 
   try {
+
     const response =
       await fetch(
         url,
         {
-          method:
-            "GET",
+          method: "GET",
 
-          redirect:
-            "follow",
+          redirect: "follow",
 
           headers: {
+
             Accept:
               "text/html,application/xhtml+xml,text/plain,*/*",
 
             "User-Agent":
-              "Mozilla/5.0 LD76-Investment-Radar/1.0"
+              "Mozilla/5.0 LD76-Investment-Radar/2.0"
           },
 
           signal:
@@ -1643,6 +2092,7 @@ async function fetchPage(
 
 
     return {
+
       ok:
         response.ok,
 
@@ -1664,8 +2114,11 @@ async function fetchPage(
         null
     };
 
+
   } catch (error) {
+
     return {
+
       ok:
         false,
 
@@ -1685,12 +2138,20 @@ async function fetchPage(
         false,
 
       error:
-        error?.message ||
-        "Request failed"
+        error?.name === "AbortError"
+          ? `Request timeout after ${REQUEST_TIMEOUT_MS}ms`
+          : (
+              error?.message ||
+              "Request failed"
+            )
     };
 
+
   } finally {
-    clearTimeout(timer);
+
+    clearTimeout(
+      timer
+    );
   }
 }
 
@@ -1702,15 +2163,18 @@ async function fetchPage(
 function extractTitle(
   html
 ) {
+
   const match =
     String(html || "")
       .match(
         /<title[^>]*>([\s\S]*?)<\/title>/i
       );
 
+
   if (!match) {
     return null;
   }
+
 
   return cleanHtmlText(
     match[1]
@@ -1721,25 +2185,47 @@ function extractTitle(
 function extractMetaDescription(
   html
 ) {
-  const match =
-    String(html || "")
-      .match(
-        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i
+
+  const source =
+    String(html || "");
+
+
+  const patterns = [
+
+    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i,
+
+    /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i
+  ];
+
+
+  for (
+    const pattern
+    of patterns
+  ) {
+
+    const match =
+      source.match(
+        pattern
       );
 
-  if (!match) {
-    return null;
+
+    if (match) {
+
+      return cleanHtmlText(
+        match[1]
+      );
+    }
   }
 
-  return cleanHtmlText(
-    match[1]
-  );
+
+  return null;
 }
 
 
 function extractUsefulText(
   html
 ) {
+
   let value =
     String(html || "");
 
@@ -1788,6 +2274,7 @@ function extractUsefulText(
 function cleanHtmlText(
   value
 ) {
+
   return String(value || "")
     .replace(
       /&nbsp;/gi,
@@ -1824,6 +2311,7 @@ function cleanHtmlText(
 function normalizeForSearch(
   value
 ) {
+
   return cleanHtmlText(
     value
   ).toLowerCase();
@@ -1834,14 +2322,17 @@ function truncateText(
   value,
   max
 ) {
+
   const text =
     String(value || "");
+
 
   if (
     text.length <= max
   ) {
     return text;
   }
+
 
   return text.slice(
     0,
@@ -1857,24 +2348,33 @@ function truncateText(
 function extractAllLinksAsText(
   html
 ) {
+
   const links = [];
+
 
   const regex =
     /href\s*=\s*["']([^"']+)["']/gi;
 
+
   let match;
 
+
   while (
-    (match = regex.exec(
-      String(html || "")
-    ))
+    (match =
+      regex.exec(
+        String(html || "")
+      ))
   ) {
+
     links.push(
       match[1]
     );
   }
 
-  return links.join("\n");
+
+  return links.join(
+    "\n"
+  );
 }
 
 
@@ -1882,21 +2382,27 @@ function extractPageLinks(
   html,
   baseUrl
 ) {
-  const links =
-    [];
+
+  const links = [];
+
 
   const regex =
     /href\s*=\s*["']([^"']+)["']/gi;
 
+
   let match;
 
+
   while (
-    (match = regex.exec(
-      String(html || "")
-    ))
+    (match =
+      regex.exec(
+        String(html || "")
+      ))
   ) {
+
     const href =
       match[1];
+
 
     if (
       !href ||
@@ -1908,20 +2414,26 @@ function extractPageLinks(
       continue;
     }
 
+
     try {
+
       const absolute =
         new URL(
           href,
           baseUrl
         ).href;
 
+
       links.push(
         absolute
       );
+
     } catch {
+
       /* ignore invalid links */
     }
   }
+
 
   return uniqueStrings(
     links
@@ -1932,16 +2444,20 @@ function extractPageLinks(
 function selectRelevantPages(
   links
 ) {
-  const selected =
-    [];
+
+  const selected = [];
+
 
   for (
     const link
     of links
   ) {
+
     let pathname;
 
+
     try {
+
       pathname =
         new URL(
           link
@@ -1951,7 +2467,9 @@ function selectRelevantPages(
             /\/+$/,
             ""
           );
+
     } catch {
+
       continue;
     }
 
@@ -1960,12 +2478,14 @@ function selectRelevantPages(
       const path
       of RELEVANT_PATHS
     ) {
+
       if (
         pathname === path ||
         pathname.startsWith(
           path + "/"
         )
       ) {
+
         selected.push(
           link
         );
@@ -1974,6 +2494,7 @@ function selectRelevantPages(
       }
     }
   }
+
 
   return uniqueStrings(
     selected
@@ -1988,19 +2509,23 @@ function selectRelevantPages(
 function collectSignalSnippets(
   text
 ) {
-  const snippets =
-    [];
+
+  const snippets = [];
+
 
   const lines =
     String(text || "")
       .split(/\n+/);
 
+
   for (
     const line
     of lines
   ) {
+
     const value =
       line.trim();
+
 
     if (
       !value ||
@@ -2009,10 +2534,12 @@ function collectSignalSnippets(
       continue;
     }
 
+
     if (
-      /investment|invest|deposit|profit|roi|return|earning|withdraw|easypaisa|jazzcash|bank|usdt|crypto|referral|affiliate/i
+      /investment|invest|crypto|cryptocurrency|bitcoin|trading|forex|staking|mining|profit|roi|return|earning|income|deposit|withdraw|yield|referral|affiliate|commission/i
         .test(value)
     ) {
+
       snippets.push(
         truncateText(
           value,
@@ -2021,12 +2548,14 @@ function collectSignalSnippets(
       );
     }
 
+
     if (
-      snippets.length >= 20
+      snippets.length >= 30
     ) {
       break;
     }
   }
+
 
   return snippets;
 }
@@ -2039,11 +2568,14 @@ function collectSignalSnippets(
 function normalizeInputDomain(
   value
 ) {
+
   if (
     typeof value ===
     "string"
   ) {
+
     return {
+
       domain:
         normalizeDomain(
           value
@@ -2063,7 +2595,9 @@ function normalizeInputDomain(
     typeof value ===
     "object"
   ) {
+
     return {
+
       domain:
         normalizeDomain(
           value.domain
@@ -2095,25 +2629,31 @@ function normalizeInputDomain(
 function uniqueDomains(
   items
 ) {
+
   const map =
     new Map();
+
 
   for (
     const item
     of items
   ) {
+
     if (
       !item?.domain
     ) {
       continue;
     }
 
+
     const existing =
       map.get(
         item.domain
       );
 
+
     if (!existing) {
+
       map.set(
         item.domain,
         item
@@ -2122,9 +2662,11 @@ function uniqueDomains(
       continue;
     }
 
+
     map.set(
       item.domain,
       {
+
         ...existing,
         ...item,
 
@@ -2143,6 +2685,7 @@ function uniqueDomains(
     );
   }
 
+
   return [
     ...map.values()
   ];
@@ -2152,6 +2695,7 @@ function uniqueDomains(
 function normalizeDomain(
   value
 ) {
+
   if (
     typeof value !==
     "string"
@@ -2159,10 +2703,12 @@ function normalizeDomain(
     return null;
   }
 
+
   let domain =
     value
       .trim()
       .toLowerCase();
+
 
   domain =
     domain.replace(
@@ -2170,11 +2716,13 @@ function normalizeDomain(
       ""
     );
 
+
   domain =
     domain.replace(
       /^https?:\/\//,
       ""
     );
+
 
   domain =
     domain
@@ -2185,6 +2733,7 @@ function normalizeDomain(
         ""
       );
 
+
   if (
     !domain ||
     domain.length > 253 ||
@@ -2193,8 +2742,10 @@ function normalizeDomain(
     return null;
   }
 
+
   const valid =
     /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
 
   return valid.test(
     domain
@@ -2213,13 +2764,18 @@ async function runWithConcurrency(
   limit,
   worker
 ) {
+
   let index =
     0;
 
+
   async function runner() {
+
     while (true) {
+
       const current =
         index++;
+
 
       if (
         current >=
@@ -2228,17 +2784,20 @@ async function runWithConcurrency(
         return;
       }
 
+
       await worker(
         items[current]
       );
     }
   }
 
+
   const workers =
     Math.min(
       limit,
       items.length
     );
+
 
   await Promise.all(
     Array.from(
@@ -2258,6 +2817,7 @@ async function runWithConcurrency(
 function uniqueStrings(
   values
 ) {
+
   return [
     ...new Set(
       (values || [])
@@ -2273,4 +2833,4 @@ function uniqueStrings(
         )
     )
   ];
-}
+    }
