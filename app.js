@@ -4,15 +4,14 @@
  * LD76 INVESTMENT RADAR
  * Main frontend controller
  *
- * IMPORTANT RULE:
- * A domain is considered "already analyzed" ONLY when:
+ * IMPORTANT:
+ * A domain is "already analyzed" ONLY when:
  *   aiAnalyzed === true
  *   AND aiScore is a valid 0-100 number.
  *
- * Failed / missing Gemini analysis is NEVER treated as analyzed.
+ * Failed/missing Gemini analysis is NEVER treated as analyzed.
  *
- * IMPORTANT:
- * There is NO arbitrary 4/5 candidate limit.
+ * NO arbitrary 4/5/10 candidate limit.
  * ALL fresh candidates are sent to /api/analyze.
  */
 
@@ -27,7 +26,7 @@ const state = {
   results: [],
 
   selectedTld: ".top",
-  selectedPeriod: "24h",
+  selectedPeriod: "1d",
 
   paymentMethods: [
     "bank",
@@ -75,13 +74,18 @@ function openDB() {
       request.onupgradeneeded = event => {
         const db = event.target.result;
 
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          const store = db.createObjectStore(
-            STORE_NAME,
-            {
-              keyPath: "domain"
-            }
-          );
+        if (
+          !db.objectStoreNames.contains(
+            STORE_NAME
+          )
+        ) {
+          const store =
+            db.createObjectStore(
+              STORE_NAME,
+              {
+                keyPath: "domain"
+              }
+            );
 
           store.createIndex(
             "aiAnalyzed",
@@ -94,15 +98,20 @@ function openDB() {
       };
 
       request.onsuccess = () => {
-        resolve(request.result);
+        resolve(
+          request.result
+        );
       };
 
       request.onerror = () => {
         reject(
           request.error ||
-          new Error("IndexedDB open failed")
+          new Error(
+            "IndexedDB open failed"
+          )
         );
       };
+
     } catch (error) {
       reject(error);
     }
@@ -111,111 +120,126 @@ function openDB() {
 
 
 async function getDomain(domain) {
-  const db = await openDB();
+  const db =
+    await openDB();
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(
-      STORE_NAME,
-      "readonly"
-    );
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          STORE_NAME,
+          "readonly"
+        );
 
-    const store =
-      transaction.objectStore(
-        STORE_NAME
-      );
+      const store =
+        transaction.objectStore(
+          STORE_NAME
+        );
 
-    const request =
-      store.get(
-        normalizeDomain(domain)
-      );
+      const request =
+        store.get(
+          normalizeDomain(
+            domain
+          )
+        );
 
-    request.onsuccess = () => {
-      resolve(
-        request.result || null
-      );
-    };
+      request.onsuccess = () => {
+        resolve(
+          request.result ||
+          null
+        );
+      };
 
-    request.onerror = () => {
-      reject(
-        request.error ||
-        new Error(
-          "IndexedDB read failed"
-        )
-      );
-    };
-  });
+      request.onerror = () => {
+        reject(
+          request.error ||
+          new Error(
+            "IndexedDB read failed"
+          )
+        );
+      };
+    }
+  );
 }
 
 
 async function saveDomain(record) {
-  const db = await openDB();
+  const db =
+    await openDB();
 
-  return new Promise((resolve, reject) => {
-    const transaction =
-      db.transaction(
-        STORE_NAME,
-        "readwrite"
-      );
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          STORE_NAME,
+          "readwrite"
+        );
 
-    const store =
-      transaction.objectStore(
-        STORE_NAME
-      );
+      const store =
+        transaction.objectStore(
+          STORE_NAME
+        );
 
-    const request =
-      store.put(record);
+      const request =
+        store.put(record);
 
-    request.onsuccess = () => {
-      resolve(true);
-    };
+      request.onsuccess = () => {
+        resolve(true);
+      };
 
-    request.onerror = () => {
-      reject(
-        request.error ||
-        new Error(
-          "IndexedDB save failed"
-        )
-      );
-    };
-  });
+      request.onerror = () => {
+        reject(
+          request.error ||
+          new Error(
+            "IndexedDB save failed"
+          )
+        );
+      };
+    }
+  );
 }
 
 
 async function getAllDomains() {
-  const db = await openDB();
+  const db =
+    await openDB();
 
-  return new Promise((resolve, reject) => {
-    const transaction =
-      db.transaction(
-        STORE_NAME,
-        "readonly"
-      );
+  return new Promise(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          STORE_NAME,
+          "readonly"
+        );
 
-    const store =
-      transaction.objectStore(
-        STORE_NAME
-      );
+      const store =
+        transaction.objectStore(
+          STORE_NAME
+        );
 
-    const request =
-      store.getAll();
+      const request =
+        store.getAll();
 
-    request.onsuccess = () => {
-      resolve(
-        Array.isArray(request.result)
-          ? request.result
-          : []
-      );
-    };
+      request.onsuccess = () => {
+        resolve(
+          Array.isArray(
+            request.result
+          )
+            ? request.result
+            : []
+        );
+      };
 
-    request.onerror = () => {
-      reject(
-        request.error ||
-        new Error(
-          "IndexedDB getAll failed"
-        )
-      );
-    };
-  });
+      request.onerror = () => {
+        reject(
+          request.error ||
+          new Error(
+            "IndexedDB getAll failed"
+          )
+        );
+      };
+    }
+  );
 }
 
 
@@ -239,8 +263,12 @@ function $all(selector) {
 }
 
 
-function setText(selector, value) {
-  const element = $(selector);
+function setText(
+  selector,
+  value
+) {
+  const element =
+    $(selector);
 
   if (!element) {
     return;
@@ -253,8 +281,12 @@ function setText(selector, value) {
 }
 
 
-function showElement(selector, visible) {
-  const element = $(selector);
+function showElement(
+  selector,
+  visible
+) {
+  const element =
+    $(selector);
 
   if (!element) {
     return;
@@ -308,7 +340,9 @@ function setProgress(message) {
 }
 
 
-function setProgressPercent(percent) {
+function setProgressPercent(
+  percent
+) {
   const value =
     Math.max(
       0,
@@ -375,7 +409,10 @@ function ensureErrorPanel() {
   const progress =
     $("#progressSection");
 
-  if (progress?.parentElement) {
+  if (
+    progress &&
+    progress.parentElement
+  ) {
     progress.parentElement.insertBefore(
       panel,
       progress
@@ -429,9 +466,11 @@ function showError(
 
   const requestCount =
     extra.requestCount != null
-      ? String(extra.requestCount)
+      ? String(
+          extra.requestCount
+        )
       : String(
-          state.geminiRequests || 0
+          state.geminiRequests
         );
 
   const message =
@@ -507,21 +546,12 @@ function makeApiError(
 }
 
 
-function displayScanError(error) {
-  const stage =
-    error?.stage ||
-    "SCAN";
+function displayScanError(
+  error
+) {
+  showError(
+    "Scan failed",
 
-  const status =
-    error?.status ??
-    "N/A";
-
-  const reason =
-    error?.providerMessage ||
-    error?.message ||
-    "Unknown error.";
-
-  const details =
     error?.data
       ? safeJson(
           error.data
@@ -530,15 +560,22 @@ function displayScanError(error) {
           error?.stack ||
           error?.message ||
           "Unknown error."
-        );
+        ),
 
-  showError(
-    "Scan failed",
-    details,
     {
-      stage,
-      status,
-      reason,
+      stage:
+        error?.stage ||
+        "SCAN",
+
+      status:
+        error?.status ??
+        "N/A",
+
+      reason:
+        error?.providerMessage ||
+        error?.message ||
+        "Unknown error.",
+
       requestCount:
         state.geminiRequests
     }
@@ -621,23 +658,22 @@ async function discoverDomains() {
                 state.selectedTld,
 
               period:
-                state.selectedPeriod,
-
-              periodHours:
-                state.selectedPeriod === "48h"
-                  ? 48
-                  : 24
+                state.selectedPeriod
             })
         }
       );
+
   } catch (error) {
     throw makeApiError(
       `Discovery network error: ${
         error?.message ||
         "Network request failed"
       }`,
+
       "DISCOVERY",
+
       "NETWORK",
+
       {
         error:
           error?.message ||
@@ -651,11 +687,15 @@ async function discoverDomains() {
   try {
     data =
       await response.json();
+
   } catch {
     throw makeApiError(
-      `Discovery returned invalid JSON.`,
+      "Discovery returned invalid JSON.",
+
       "DISCOVERY",
+
       response.status,
+
       {
         error:
           "Server response could not be parsed as JSON."
@@ -669,13 +709,50 @@ async function discoverDomains() {
   ) {
     throw makeApiError(
       "Discovery API failed.",
+
+      data?.stage ||
       "DISCOVERY",
+
       response.status,
+
       data
     );
   }
 
-  return data;
+  /*
+   * NEW discover.js returns:
+   *
+   * candidates: [...]
+   *
+   * Keep compatibility with older response names too.
+   */
+  const candidates =
+    Array.isArray(
+      data.candidates
+    )
+      ? data.candidates
+      : Array.isArray(
+          data.domains
+        )
+        ? data.domains
+        : Array.isArray(
+            data.results
+          )
+          ? data.results
+          : [];
+
+  return {
+    ...data,
+
+    candidates,
+
+    count:
+      Number(
+        data.discovered ??
+        data.count ??
+        candidates.length
+      )
+  };
 }
 
 
@@ -683,7 +760,9 @@ async function discoverDomains() {
    WEBSITE SCANNER
 ========================================================= */
 
-async function scanDomains(domains) {
+async function scanDomains(
+  domains
+) {
   if (
     !Array.isArray(domains) ||
     !domains.length
@@ -721,14 +800,18 @@ async function scanDomains(domains) {
             })
         }
       );
+
   } catch (error) {
     throw makeApiError(
       `Scanner network error: ${
         error?.message ||
         "Network request failed"
       }`,
+
       "WEBSITE SCANNER",
+
       "NETWORK",
+
       {
         error:
           error?.message ||
@@ -742,11 +825,15 @@ async function scanDomains(domains) {
   try {
     data =
       await response.json();
+
   } catch {
     throw makeApiError(
       "Scanner returned invalid JSON.",
+
       "WEBSITE SCANNER",
+
       response.status,
+
       {
         error:
           "Server response could not be parsed as JSON."
@@ -760,8 +847,12 @@ async function scanDomains(domains) {
   ) {
     throw makeApiError(
       "Website scanner failed.",
+
+      data?.stage ||
       "WEBSITE SCANNER",
+
       response.status,
+
       data
     );
   }
@@ -776,7 +867,7 @@ async function scanDomains(domains) {
 
 
 /* =========================================================
-   ALREADY ANALYZED FILTER
+   ALREADY ANALYZED
 ========================================================= */
 
 function hasValidSavedGeminiAnalysis(
@@ -810,10 +901,12 @@ async function filterAlreadyAnalyzed(
 ) {
   const fresh = [];
 
-  let alreadyAnalyzed = 0;
+  let alreadyAnalyzed =
+    0;
 
   for (
-    const candidate of candidates
+    const candidate
+    of candidates
   ) {
     const domain =
       normalizeDomain(
@@ -831,24 +924,24 @@ async function filterAlreadyAnalyzed(
         await getDomain(
           domain
         );
+
     } catch (error) {
       throw makeApiError(
         `Could not check local history for ${domain}.`,
+
         "HISTORY FILTER",
+
         "INDEXEDDB",
+
         {
           error:
             error?.message ||
             "IndexedDB read failed",
+
           domain
         }
       );
     }
-
-    /*
-     * ONLY successfully analyzed records
-     * are removed.
-     */
 
     if (
       hasValidSavedGeminiAnalysis(
@@ -880,7 +973,9 @@ async function filterAlreadyAnalyzed(
 async function analyzeWithGemini(
   candidates
 ) {
-  if (!state.geminiEnabled) {
+  if (
+    !state.geminiEnabled
+  ) {
     return {
       skipped: true,
       results: [],
@@ -900,12 +995,10 @@ async function analyzeWithGemini(
   }
 
   /*
-   * NO arbitrary candidate limit.
+   * NO arbitrary limit.
+   * ALL fresh candidates are submitted.
    *
-   * Every fresh candidate is sent.
-   *
-   * Backend handles batching only when
-   * request size requires it.
+   * /api/analyze handles batching if needed.
    */
 
   const payloadCandidates =
@@ -942,18 +1035,23 @@ async function analyzeWithGemini(
             })
         }
       );
+
   } catch (error) {
     throw makeApiError(
       `Gemini connection failed: ${
         error?.message ||
         "Network error"
       }`,
+
       "GEMINI CONNECTION",
+
       "NETWORK",
+
       {
         error:
           error?.message ||
           "Unable to connect to /api/analyze",
+
         submittedCandidates:
           payloadCandidates.length
       }
@@ -965,11 +1063,15 @@ async function analyzeWithGemini(
   try {
     data =
       await response.json();
+
   } catch {
     throw makeApiError(
       "Gemini backend returned invalid JSON.",
+
       "GEMINI BACKEND",
+
       response.status,
+
       {
         error:
           "The /api/analyze response was not valid JSON."
@@ -977,32 +1079,37 @@ async function analyzeWithGemini(
     );
   }
 
-  /*
-   * Always capture the real backend request count,
-   * even when backend reports an error.
-   */
-
   state.geminiRequests =
     Number(
       data?.requestCount || 0
     );
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
     throw makeApiError(
       "Gemini analysis request failed.",
+
       data?.stage ||
-        "GEMINI API",
+      "GEMINI API",
+
       response.status,
+
       data
     );
   }
 
-  if (!data?.ok) {
+  if (
+    !data?.ok
+  ) {
     throw makeApiError(
       "Gemini backend returned ok=false.",
+
       data?.stage ||
-        "GEMINI API",
+      "GEMINI API",
+
       response.status,
+
       data
     );
   }
@@ -1019,24 +1126,28 @@ async function analyzeWithGemini(
       ? data.results.length
       : 0;
 
-  /*
-   * Backend may have successfully responded but
-   * Gemini may have returned no valid scores.
-   */
-
-  if (!results.length) {
+  if (
+    !results.length
+  ) {
     throw makeApiError(
-      `Gemini returned no valid scored results.`,
+      "Gemini returned no valid scored results.",
+
       "GEMINI RESULT VALIDATION",
+
       response.status,
+
       {
         error:
           "No result contained a valid scamScore between 0 and 100.",
+
         submittedCount:
           payloadCandidates.length,
+
         rawResultCount,
+
         requestCount:
           state.geminiRequests,
+
         backend:
           data
       }
@@ -1121,31 +1232,15 @@ function compactCandidate(
 
     investment:
       candidate?.investment ||
-      {
-        relevant: false,
-        score: 0,
-        keywords: [],
-        dailyReturnClaims: [],
-        roiClaims: []
-      },
+      {},
 
     paymentMethods:
       candidate?.paymentMethods ||
-      {
-        bank: false,
-        easypaisa: false,
-        jazzcash: false,
-        crypto: false,
-        detected: []
-      },
+      {},
 
     transparency:
       candidate?.transparency ||
-      {
-        company: [],
-        legal: [],
-        support: []
-      },
+      {},
 
     snippets:
       Array.isArray(
@@ -1176,21 +1271,30 @@ function normalizeGeminiResults(
   let rawResults =
     data?.results;
 
-  if (!Array.isArray(rawResults)) {
+  if (
+    !Array.isArray(
+      rawResults
+    )
+  ) {
     rawResults =
       data?.analyses ||
       data?.analysis ||
       [];
   }
 
-  if (!Array.isArray(rawResults)) {
+  if (
+    !Array.isArray(
+      rawResults
+    )
+  ) {
     return [];
   }
 
   const results = [];
 
   for (
-    const item of rawResults
+    const item
+    of rawResults
   ) {
     if (!item) {
       continue;
@@ -1207,21 +1311,13 @@ function normalizeGeminiResults(
       continue;
     }
 
-    const rawScore =
-      item.scamScore ??
-      item.aiScore ??
-      item.score ??
-      item.geminiScamScore;
-
     const score =
       Number(
-        rawScore
+        item.scamScore ??
+        item.aiScore ??
+        item.score ??
+        item.geminiScamScore
       );
-
-    /*
-     * A null/invalid score means this candidate
-     * was NOT successfully analyzed.
-     */
 
     if (
       !Number.isFinite(score) ||
@@ -1306,7 +1402,9 @@ function normalizeGeminiResults(
         "",
 
       band:
-        scamBand(score)
+        scamBand(
+          score
+        )
     });
   }
 
@@ -1323,7 +1421,9 @@ async function saveAnalysisResults(
   geminiResults
 ) {
   if (
-    !Array.isArray(geminiResults) ||
+    !Array.isArray(
+      geminiResults
+    ) ||
     !geminiResults.length
   ) {
     return 0;
@@ -1344,7 +1444,8 @@ async function saveAnalysisResults(
   let savedCount = 0;
 
   for (
-    const analysis of geminiResults
+    const analysis
+    of geminiResults
   ) {
     const domain =
       normalizeDomain(
@@ -1355,21 +1456,11 @@ async function saveAnalysisResults(
       continue;
     }
 
-    /*
-     * Never accept a Gemini result for a domain
-     * that was not actually submitted.
-     */
-
     if (
       !submittedDomains.has(
         domain
       )
     ) {
-      console.warn(
-        "Ignoring Gemini result for unsubmitted domain:",
-        domain
-      );
-
       continue;
     }
 
@@ -1415,10 +1506,8 @@ async function saveAnalysisResults(
       Math.round(score);
 
     /*
-     * First save the complete analysis with
-     * aiAnalyzed=false.
+     * First save with aiAnalyzed=false.
      */
-
     const record = {
       ...(existing || {}),
       ...(candidate || {}),
@@ -1504,10 +1593,6 @@ async function saveAnalysisResults(
       continue;
     }
 
-    /*
-     * Verify first save.
-     */
-
     let verified = null;
 
     try {
@@ -1516,12 +1601,6 @@ async function saveAnalysisResults(
           domain
         );
     } catch (error) {
-      console.error(
-        "Could not verify Gemini save:",
-        domain,
-        error
-      );
-
       continue;
     }
 
@@ -1531,19 +1610,13 @@ async function saveAnalysisResults(
         verified.aiScore
       ) !== finalScore
     ) {
-      console.error(
-        "Gemini result save verification failed:",
-        domain
-      );
-
       continue;
     }
 
     /*
-     * ONLY after successful score verification
-     * mark aiAnalyzed=true.
+     * ONLY after successful save verification:
+     * aiAnalyzed=true
      */
-
     const analyzedRecord = {
       ...verified,
 
@@ -1556,18 +1629,8 @@ async function saveAnalysisResults(
         analyzedRecord
       );
     } catch (error) {
-      console.error(
-        "Failed marking domain as analyzed:",
-        domain,
-        error
-      );
-
       continue;
     }
-
-    /*
-     * Final verification.
-     */
 
     let finalVerified = null;
 
@@ -1577,12 +1640,6 @@ async function saveAnalysisResults(
           domain
         );
     } catch (error) {
-      console.error(
-        "Final Gemini verification failed:",
-        domain,
-        error
-      );
-
       continue;
     }
 
@@ -1676,11 +1733,10 @@ async function startScan() {
   );
 
   try {
-    /*
-     * =====================================================
-     * STEP 1 — DISCOVERY
-     * =====================================================
-     */
+
+    /* =====================================================
+       STEP 1 — DISCOVERY
+    ===================================================== */
 
     setStatus(
       `Discovering new ${state.selectedTld} domains (${state.selectedPeriod.toUpperCase()})...`
@@ -1693,16 +1749,16 @@ async function startScan() {
     const discovery =
       await discoverDomains();
 
+    /*
+     * NEW discover.js:
+     * discovery.candidates
+     */
     state.domains =
       Array.isArray(
-        discovery.domains
+        discovery.candidates
       )
-        ? discovery.domains
-        : Array.isArray(
-            discovery.results
-          )
-          ? discovery.results
-          : [];
+        ? discovery.candidates
+        : [];
 
     state.discoveredCount =
       Number(
@@ -1715,7 +1771,7 @@ async function startScan() {
     );
 
     setProgress(
-      `Discovered ${state.discoveredCount} domains.`
+      `Discovered ${state.discoveredCount} registered-domain candidate(s).`
     );
 
     if (
@@ -1731,18 +1787,16 @@ async function startScan() {
     }
 
 
-    /*
-     * =====================================================
-     * STEP 2 — WEBSITE SCANNER
-     * =====================================================
-     */
+    /* =====================================================
+       STEP 2 — WEBSITE SCANNER
+    ===================================================== */
 
     setStatus(
       `Scanning ALL ${state.domains.length} discovered domains...`
     );
 
     setProgress(
-      `Scanning all ${state.domains.length} discovered domains for investment + payment evidence...`
+      `Scanning all ${state.domains.length} domains for investment + payment evidence...`
     );
 
     const scan =
@@ -1757,11 +1811,6 @@ async function startScan() {
         ? scan.candidates
         : [];
 
-    /*
-     * Relevant count means FINAL candidates,
-     * not raw paymentMatches.
-     */
-
     state.relevantCount =
       state.candidates.length;
 
@@ -1772,13 +1821,9 @@ async function startScan() {
     updateProgressText();
 
 
-    /*
-     * =====================================================
-     * STEP 3 — HISTORY FILTER
-     * =====================================================
-     *
-     * ONLY successful Gemini analyses are removed.
-     */
+    /* =====================================================
+       STEP 3 — HISTORY FILTER
+    ===================================================== */
 
     setStatus(
       "Checking previous Gemini analyses..."
@@ -1794,11 +1839,6 @@ async function startScan() {
 
     updateProgressText();
 
-
-    /*
-     * Nothing fresh for Gemini.
-     */
-
     if (
       !candidatesForAi.length
     ) {
@@ -1808,7 +1848,7 @@ async function startScan() {
 
       setStatus(
         state.candidates.length
-          ? "All matching candidates were already successfully analyzed by Gemini."
+          ? "All matching domains were already successfully analyzed by Gemini."
           : "No investment/payment candidates were found."
       );
 
@@ -1818,11 +1858,9 @@ async function startScan() {
     }
 
 
-    /*
-     * =====================================================
-     * STEP 4 — GEMINI
-     * =====================================================
-     */
+    /* =====================================================
+       STEP 4 — GEMINI
+    ===================================================== */
 
     setStatus(
       `Sending ALL ${candidatesForAi.length} fresh candidate(s) to Gemini...`
@@ -1847,8 +1885,11 @@ async function startScan() {
     ) {
       throw makeApiError(
         `Gemini returned no valid scored results for ${candidatesForAi.length} candidate(s).`,
+
         "GEMINI RESULT VALIDATION",
+
         200,
+
         {
           submittedCount:
             candidatesForAi.length,
@@ -1864,11 +1905,9 @@ async function startScan() {
     }
 
 
-    /*
-     * =====================================================
-     * STEP 5 — SAVE
-     * =====================================================
-     */
+    /* =====================================================
+       STEP 5 — SAVE
+    ===================================================== */
 
     setStatus(
       `Saving ${aiResponse.results.length} Gemini result(s) to local history...`
@@ -1902,8 +1941,11 @@ async function startScan() {
     } else {
       throw makeApiError(
         "Gemini returned scores, but no result could be verified in local history.",
+
         "INDEXEDDB SAVE",
+
         "LOCAL",
+
         {
           submittedCount:
             candidatesForAi.length,
@@ -1920,10 +1962,6 @@ async function startScan() {
     renderResults();
 
   } catch (error) {
-    /*
-     * NEVER hide the real error.
-     */
-
     state.lastError =
       error?.message ||
       "Unknown scan error";
@@ -1949,7 +1987,7 @@ async function startScan() {
 
 
 /* =========================================================
-   RESULT RENDERING
+   RESULTS
 ========================================================= */
 
 function renderResults() {
@@ -1988,7 +2026,8 @@ function renderResults() {
     );
 
   for (
-    const result of sorted
+    const result
+    of sorted
   ) {
     container.appendChild(
       createResultCard(
@@ -2144,7 +2183,6 @@ function createResultCard(
                 )
                 .join("")}
             </ul>
-
           </div>
         `
         : ""
@@ -2166,7 +2204,6 @@ function createResultCard(
                 )
                 .join("")}
             </ul>
-
           </div>
         `
         : ""
@@ -2188,7 +2225,6 @@ function createResultCard(
                 )
                 .join("")}
             </ul>
-
           </div>
         `
         : ""
@@ -2210,7 +2246,6 @@ function createResultCard(
                 )
                 .join(", ")}
             </div>
-
           </div>
         `
         : ""
@@ -2227,7 +2262,6 @@ function createResultCard(
                 result.aiRecommendation
               )}
             </div>
-
           </div>
         `
         : ""
@@ -2266,58 +2300,32 @@ function createResultCard(
 ========================================================= */
 
 async function loadHistory() {
-  try {
-    const records =
-      await getAllDomains();
+  const records =
+    await getAllDomains();
 
-    state.results =
-      records
-        .filter(
-          hasValidSavedGeminiAnalysis
-        )
-        .sort(
-          (a, b) =>
-            new Date(
-              b.aiAnalyzedAt || 0
-            ) -
-            new Date(
-              a.aiAnalyzedAt || 0
-            )
-        );
+  state.results =
+    records
+      .filter(
+        hasValidSavedGeminiAnalysis
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            b.aiAnalyzedAt || 0
+          ) -
+          new Date(
+            a.aiAnalyzedAt || 0
+          )
+      );
 
-    renderResults();
+  renderResults();
 
-    return state.results;
-
-  } catch (error) {
-    console.error(
-      "History load failed:",
-      error
-    );
-
-    showError(
-      "History load failed",
-      error?.stack ||
-      error?.message ||
-      "Unknown IndexedDB error.",
-      {
-        stage:
-          "HISTORY",
-        status:
-          "INDEXEDDB",
-        reason:
-          error?.message ||
-          "Unknown error"
-      }
-    );
-
-    return [];
-  }
+  return state.results;
 }
 
 
 /* =========================================================
-   PERIOD / TLD / PAYMENT SETTINGS
+   TLD / PERIOD / PAYMENT
 ========================================================= */
 
 function readSelectedTld() {
@@ -2342,11 +2350,13 @@ function readSelectedPeriod() {
       ".period-button.active"
     );
 
-  if (activeButton) {
+  if (
+    activeButton
+  ) {
     state.selectedPeriod =
       String(
         activeButton.dataset.period ||
-        "24h"
+        "1d"
       );
   }
 }
@@ -2364,7 +2374,8 @@ function readPaymentMethods() {
     );
 
   for (
-    const checkbox of checkboxes
+    const checkbox
+    of checkboxes
   ) {
     if (
       checkbox.checked &&
@@ -2412,7 +2423,9 @@ function updatePeriodIndicator() {
       ".period-button"
     );
 
-  if (!buttons.length) {
+  if (
+    !buttons.length
+  ) {
     return;
   }
 
@@ -2424,12 +2437,14 @@ function updatePeriodIndicator() {
         )
     );
 
-  if (!activeButton) {
+  if (
+    !activeButton
+  ) {
     activeButton =
       buttons.find(
         button =>
           button.dataset.period ===
-          "24h"
+          "1d"
       ) ||
       buttons[0];
 
@@ -2441,11 +2456,12 @@ function updatePeriodIndicator() {
   const period =
     String(
       activeButton.dataset.period ||
-      "24h"
+      "1d"
     );
 
   for (
-    const button of buttons
+    const button
+    of buttons
   ) {
     const active =
       button ===
@@ -2497,8 +2513,19 @@ function updatePeriodIndicator() {
     );
   }
 
+  const labels = {
+    "1d": "1 DAY",
+    "3d": "3 DAYS",
+    "7d": "7 DAYS",
+    "15d": "15 DAYS",
+    "1m": "1 MONTH"
+  };
+
   indicator.textContent =
-    `ACTIVE PERIOD: ${period.toUpperCase()}`;
+    `ACTIVE PERIOD: ${
+      labels[period] ||
+      period.toUpperCase()
+    }`;
 }
 
 
@@ -2508,7 +2535,9 @@ function setupPeriodButtons() {
       ".period-button"
     );
 
-  if (!buttons.length) {
+  if (
+    !buttons.length
+  ) {
     return;
   }
 
@@ -2520,12 +2549,15 @@ function setupPeriodButtons() {
         )
     );
 
+  /*
+   * New default = 1 Day.
+   */
   if (!activeFound) {
     const defaultButton =
       buttons.find(
         button =>
           button.dataset.period ===
-          "24h"
+          "1d"
       ) ||
       buttons[0];
 
@@ -2535,13 +2567,16 @@ function setupPeriodButtons() {
   }
 
   for (
-    const button of buttons
+    const button
+    of buttons
   ) {
     button.addEventListener(
       "click",
       () => {
+
         for (
-          const item of buttons
+          const item
+          of buttons
         ) {
           item.classList.remove(
             "active"
@@ -2555,7 +2590,7 @@ function setupPeriodButtons() {
         state.selectedPeriod =
           String(
             button.dataset.period ||
-            "24h"
+            "1d"
           );
 
         updatePeriodIndicator();
@@ -2579,7 +2614,8 @@ function setupPaymentMethods() {
     );
 
   for (
-    const checkbox of checkboxes
+    const checkbox
+    of checkboxes
   ) {
     checkbox.addEventListener(
       "change",
@@ -2595,7 +2631,7 @@ function setupPaymentMethods() {
 
 
 /* =========================================================
-   SETTINGS VIEW
+   SETTINGS
 ========================================================= */
 
 function getSettingsPanel() {
@@ -2622,15 +2658,12 @@ function getSettingsPanel() {
 
   panel.innerHTML = `
     <div class="section-header">
-
       <div>
         <h2>Settings</h2>
-
         <p>
           Configure discovery and payment filters.
         </p>
       </div>
-
     </div>
 
     <div
@@ -2668,11 +2701,10 @@ function getSettingsPanel() {
   if (backButton) {
     backButton.addEventListener(
       "click",
-      () => {
+      () =>
         showView(
           "home"
-        );
-      }
+        )
     );
   }
 
@@ -2722,6 +2754,14 @@ function updateSettingsView() {
           .join(", ")
       : "None selected";
 
+  const periodLabels = {
+    "1d": "1 Day",
+    "3d": "3 Days",
+    "7d": "7 Days",
+    "15d": "15 Days",
+    "1m": "1 Month"
+  };
+
   content.innerHTML = `
     <div class="settings-item">
       <strong>TLD</strong>
@@ -2736,7 +2776,10 @@ function updateSettingsView() {
       <strong>Discovery Period</strong>
       <div>
         ${escapeHtml(
-          state.selectedPeriod.toUpperCase()
+          periodLabels[
+            state.selectedPeriod
+          ] ||
+          state.selectedPeriod
         )}
       </div>
     </div>
@@ -2796,7 +2839,8 @@ function setActiveNav(
     );
 
   for (
-    const button of navButtons
+    const button
+    of navButtons
   ) {
     const active =
       button.dataset.view ===
@@ -2902,10 +2946,6 @@ async function showView(
     return;
   }
 
-  /*
-   * HOME
-   */
-
   if (scanPanel) {
     scanPanel.style.display =
       "";
@@ -2936,7 +2976,8 @@ function setupNavigation() {
     );
 
   for (
-    const button of navButtons
+    const button
+    of navButtons
   ) {
     button.addEventListener(
       "click",
@@ -2960,14 +3001,18 @@ function setupNavigation() {
         } catch (error) {
           showError(
             "Navigation failed",
+
             error?.stack ||
             error?.message ||
             "Unknown navigation error.",
+
             {
               stage:
                 "NAVIGATION",
+
               status:
                 "LOCAL",
+
               reason:
                 error?.message ||
                 "Unknown error"
@@ -2981,7 +3026,7 @@ function setupNavigation() {
 
 
 /* =========================================================
-   HEADER SETTINGS BUTTON
+   SETTINGS BUTTON
 ========================================================= */
 
 function setupSettingsButton() {
@@ -3010,14 +3055,18 @@ function setupSettingsButton() {
       } catch (error) {
         showError(
           "Settings view failed",
+
           error?.stack ||
           error?.message ||
           "Unknown settings error.",
+
           {
             stage:
               "SETTINGS",
+
             status:
               "LOCAL",
+
             reason:
               error?.message ||
               "Unknown error"
@@ -3059,21 +3108,20 @@ function setupRefreshButton() {
         );
 
       } catch (error) {
-        console.error(
-          "Refresh failed:",
-          error
-        );
-
         showError(
           "History refresh failed",
+
           error?.stack ||
           error?.message ||
           "Unknown error.",
+
           {
             stage:
               "HISTORY REFRESH",
+
             status:
               "LOCAL",
+
             reason:
               error?.message ||
               "Unknown error"
@@ -3101,18 +3149,18 @@ function setupScanButton() {
     $("#scanButton");
 
   if (!button) {
-    console.error(
-      "LD76 ERROR: Scan button not found."
-    );
-
     showError(
       "Scan button not found",
+
       "The frontend could not find #findSitesButton, #findSites, #findNewSites or #scanButton in index.html.",
+
       {
         stage:
           "INITIALIZATION",
+
         status:
           "DOM",
+
         reason:
           "Scan button selector did not match any element."
       }
@@ -3225,11 +3273,9 @@ function normalizeStringArray(
     String(value)
       .trim();
 
-  if (!text) {
-    return [];
-  }
-
-  return [text];
+  return text
+    ? [text]
+    : [];
 }
 
 
@@ -3242,12 +3288,9 @@ function normalizeConfidence(
     return "Unknown";
   }
 
-  const text =
-    String(value)
-      .trim();
-
   return (
-    text ||
+    String(value)
+      .trim() ||
     "Unknown"
   );
 }
@@ -3339,8 +3382,7 @@ function escapeAttribute(
     .replace(
       /data:/gi,
       ""
-    )
-  ;
+    );
 }
 
 
@@ -3364,6 +3406,7 @@ function isSafeHttpUrl(
       url.protocol ===
         "https:"
     );
+
   } catch {
     return false;
   }
@@ -3371,7 +3414,7 @@ function isSafeHttpUrl(
 
 
 /* =========================================================
-   GLOBAL FRONTEND ERROR HANDLING
+   GLOBAL ERRORS
 ========================================================= */
 
 window.addEventListener(
@@ -3384,14 +3427,18 @@ window.addEventListener(
 
     showError(
       "Frontend JavaScript error",
+
       event.error?.stack ||
       event.message ||
       "Unknown JavaScript error.",
+
       {
         stage:
           "FRONTEND",
+
         status:
           "JS",
+
         reason:
           event.message ||
           "JavaScript runtime error"
@@ -3411,16 +3458,20 @@ window.addEventListener(
 
     showError(
       "Unhandled frontend promise error",
+
       event.reason?.stack ||
       event.reason?.message ||
       String(
         event.reason
       ),
+
       {
         stage:
           "FRONTEND PROMISE",
+
         status:
           "JS",
+
         reason:
           event.reason?.message ||
           String(
@@ -3459,15 +3510,7 @@ async function initApp() {
 
     clearError();
 
-    /*
-     * Load saved Gemini history.
-     */
-
     await loadHistory();
-
-    /*
-     * Home = initial view.
-     */
 
     await showView(
       "home"
@@ -3485,14 +3528,18 @@ async function initApp() {
 
     showError(
       "Application initialization failed",
+
       error?.stack ||
       error?.message ||
       "Unknown initialization error.",
+
       {
         stage:
           "INITIALIZATION",
+
         status:
           "LOCAL",
+
         reason:
           error?.message ||
           "Unknown initialization error"
@@ -3519,4 +3566,4 @@ if (
   );
 } else {
   initApp();
-         }
+}
