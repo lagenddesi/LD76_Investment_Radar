@@ -12,7 +12,7 @@ FEEDS = {
 }
 
 
-MAX_DOMAINS = 500
+MAX_DOMAINS = 5000
 MAX_WORKERS = 40
 
 
@@ -27,7 +27,7 @@ def _fetch(url):
 
     with urllib.request.urlopen(
         request,
-        timeout=60,
+        timeout=600,
     ) as response:
         return response.read().decode(
             "utf-8",
