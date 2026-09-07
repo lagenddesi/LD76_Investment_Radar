@@ -1,7 +1,8 @@
 from fastapi import FastAPI,Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from scanner import scan_domains
+from scanner import scan_domains,get_scan
 from rdap import lookup_domain
 
 app=FastAPI(title="LD76 Investment Radar")
@@ -13,24 +14,22 @@ class ScanRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"app":"LD76 Investment Radar","status":"online"}
+    return FileResponse("ui.html",media_type="text/html")
+
+@app.get("/health")
+def health():
+    return {"status":"ok","app":"LD76 Investment Radar"}
 
 @app.post("/api/scan")
 def start_scan(req:ScanRequest):
     period=max(1,min(req.period,7))
     tld=req.tld.lower().strip() or "all"
-    scan_id=scan_domains(period,tld)
-    return {"scan_id":scan_id,"status":"started"}
+    return {"scan_id":scan_domains(period,tld),"status":"started"}
 
 @app.get("/api/scan/{scan_id}/results")
 def scan_results(scan_id:str):
-    from scanner import get_scan
     return get_scan(scan_id)
 
 @app.get("/api/rdap")
 def rdap(domain:str=Query(...,min_length=3)):
     return lookup_domain(domain.strip().lower())
-
-@app.get("/health")
-def health():
-    return {"status":"ok"}
