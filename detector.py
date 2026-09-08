@@ -9,7 +9,6 @@ DEFAULT_MIN_SCORE = 30
 DEFAULT_NEGATIVE_PENALTY = 12
 
 
-# Core investment / financial identity signals.
 STRONG = {
     "investment": [
         "investment",
@@ -27,12 +26,13 @@ STRONG = {
         "start investing",
         "invest with us",
         "investment opportunity",
+        "grow your investment",
+        "investment portfolio",
     ],
     "trading": [
         "trading",
         "trader",
         "traders",
-        "trade forex",
         "forex trading",
         "forex trader",
         "stock trading",
@@ -44,6 +44,11 @@ STRONG = {
         "trading system",
         "trading signals",
         "trading software",
+        "trade forex",
+        "trade stocks",
+        "trade crypto",
+        "crypto trading",
+        "online broker",
     ],
     "finance": [
         "finance",
@@ -53,21 +58,21 @@ STRONG = {
         "financial platform",
         "financial market",
         "financial markets",
-        "capital",
         "capital markets",
         "financial solutions",
+        "financial institution",
     ],
     "brokerage": [
         "broker",
         "brokerage",
         "brokerage account",
         "brokerage platform",
-        "online broker",
         "stock broker",
         "stockbroker",
         "forex broker",
         "crypto broker",
         "securities broker",
+        "broker account",
     ],
     "wealth": [
         "wealth management",
@@ -77,8 +82,8 @@ STRONG = {
         "asset manager",
         "portfolio management",
         "portfolio manager",
-        "portfolio",
         "private wealth",
+        "manage your portfolio",
     ],
     "funds": [
         "investment fund",
@@ -98,14 +103,12 @@ STRONG = {
         "digital assets",
         "crypto exchange",
         "cryptocurrency exchange",
-        "crypto trading",
         "crypto investment",
         "digital asset trading",
     ],
 }
 
 
-# Supporting financial activity signals.
 CONTEXT = [
     "investment account",
     "investor account",
@@ -114,7 +117,6 @@ CONTEXT = [
     "open account",
     "open an account",
     "create account",
-    "portfolio",
     "manage portfolio",
     "portfolio management",
     "market analysis",
@@ -145,15 +147,23 @@ CONTEXT = [
     "investment return",
     "investment returns",
     "return on investment",
-    "roi",
     "annual return",
     "passive income",
     "investment opportunity",
     "financial opportunity",
+    "profit from trading",
+    "profit from investment",
+    "trading profit",
+    "investment profit",
+    "earn from trading",
+    "earn from investment",
+    "account balance",
+    "market price",
+    "buy crypto",
+    "sell crypto",
 ]
 
 
-# These are weak and never qualify a domain by themselves.
 GENERIC = [
     "profit",
     "profits",
@@ -176,7 +186,6 @@ GENERIC = [
 ]
 
 
-# Gambling signals are treated as hard negatives.
 GAMBLING = [
     "casino",
     "online casino",
@@ -233,19 +242,11 @@ def _settings(settings):
 
     def integer(key, default, low, high):
         try:
-            value = int(
-                settings.get(
-                    key,
-                    default,
-                )
-            )
+            value = int(settings.get(key, default))
         except Exception:
             value = default
 
-        return max(
-            low,
-            min(value, high),
-        )
+        return max(low, min(value, high))
 
     return {
         "timeout": integer(
@@ -273,16 +274,10 @@ def _settings(settings):
             50,
         ),
         "redirects": bool(
-            settings.get(
-                "redirects",
-                True,
-            )
+            settings.get("redirects", True)
         ),
         "https_fallback": bool(
-            settings.get(
-                "https_fallback",
-                True,
-            )
+            settings.get("https_fallback", True)
         ),
     }
 
@@ -296,7 +291,7 @@ def _fetch(url, cfg):
                 "User-Agent": (
                     "Mozilla/5.0 "
                     "(compatible; "
-                    "LD76-Investment-Radar/7.0)"
+                    "LD76-Investment-Radar/8.0)"
                 ),
                 "Accept": (
                     "text/html,application/xhtml+xml,"
@@ -388,10 +383,7 @@ def _extract(html):
             or ""
         ).lower()
 
-        content = (
-            tag.get("content")
-            or ""
-        )
+        content = tag.get("content") or ""
 
         if name in (
             "description",
@@ -471,15 +463,11 @@ def _matches(text):
         NEGATIVE,
     )
 
-    evidence.extend(
-        context_hits
-    )
+    evidence.extend(context_hits)
 
     return (
         categories,
-        list(
-            dict.fromkeys(evidence)
-        ),
+        list(dict.fromkeys(evidence)),
         context_hits,
         generic_hits,
         gambling_hits,
@@ -491,51 +479,51 @@ def _score(
     categories,
     evidence,
     context_hits,
+    generic_hits,
     gambling_hits,
 ):
     score = 0
 
-    # Core financial identity.
-    score += len(categories) * 10
+    # Category identity.
+    score += len(categories) * 12
 
-    # Strong phrases.
+    # Strong evidence.
     score += min(
         len(evidence) * 3,
         36,
     )
 
-    # Category bonuses.
-    if "investment" in categories:
-        score += 18
+    # Important category bonuses.
+    bonuses = {
+        "investment": 20,
+        "trading": 20,
+        "finance": 12,
+        "brokerage": 16,
+        "wealth": 16,
+        "funds": 16,
+        "crypto": 8,
+    }
 
-    if "trading" in categories:
-        score += 18
+    for category, bonus in bonuses.items():
+        if category in categories:
+            score += bonus
 
-    if "finance" in categories:
-        score += 10
-
-    if "brokerage" in categories:
-        score += 14
-
-    if "wealth" in categories:
-        score += 14
-
-    if "funds" in categories:
-        score += 14
-
-    if "crypto" in categories:
-        score += 7
-
-    # Financial context.
+    # Contextual activity.
     score += min(
-        len(context_hits) * 3,
-        18,
+        len(context_hits) * 4,
+        24,
+    )
+
+    # Generic words only provide tiny support.
+    score += min(
+        len(generic_hits),
+        4,
     )
 
     # Gambling penalty.
     score -= min(
-        len(gambling_hits) * 25,
-        90,
+        len(gambling_hits) * 30,
+        100,
     )
 
     return max(
@@ -552,9 +540,7 @@ def detect_investment(
         domain or ""
     ).strip().lower()
 
-    cfg = _settings(
-        settings
-    )
+    cfg = _settings(settings)
 
     html, url = _page(
         domain,
@@ -567,9 +553,7 @@ def detect_investment(
             "domain": domain,
         }
 
-    text, title = _extract(
-        html
-    )
+    text, title = _extract(html)
 
     (
         categories,
@@ -584,32 +568,25 @@ def detect_investment(
         categories,
         evidence,
         context_hits,
+        generic_hits,
         gambling_hits,
     )
 
-    strong_count = len(
-        categories
-    )
+    strong_count = len(categories)
 
-    # A single weak word must never qualify.
-    #
-    # One genuine financial category plus
-    # supporting financial context is enough.
-    #
-    # Multiple financial categories can qualify
-    # even when the page uses unusual wording.
+    # Real financial identity.
     financial_match = (
         (
             strong_count >= 1
             and (
-                context_hits
-                or len(evidence) >= 2
+                len(context_hits) >= 1
+                or len(evidence) >= 3
             )
         )
         or strong_count >= 2
     )
 
-    # Gambling is a hard exclusion.
+    # Gambling exclusion.
     gambling_reject = (
         len(gambling_hits) >= 2
         or (
@@ -618,18 +595,21 @@ def detect_investment(
         )
     )
 
+    # Parked/default pages.
+    parked_reject = len(negatives) >= 2
+
     qualified = (
-        not gambling_reject
-        and financial_match
+        financial_match
+        and not gambling_reject
+        and not parked_reject
         and score >= cfg["min_score"]
-        and len(negatives) < 2
     )
 
     if gambling_reject:
-        score = min(
-            score,
-            10,
-        )
+        score = min(score, 10)
+
+    if parked_reject:
+        score = min(score, 10)
 
     if categories:
         category = max(
