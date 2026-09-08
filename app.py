@@ -10,7 +10,6 @@ app = FastAPI(
     title="LD76 Investment Radar"
 )
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,6 +44,8 @@ def api_health():
 
 @app.post("/api/scan")
 def start_scan(payload: dict):
+    payload = payload or {}
+
     period = payload.get("period", 1)
     tld = payload.get("tld", "all")
 
@@ -53,15 +54,49 @@ def start_scan(payload: dict):
     except Exception:
         period = 1
 
-    period = max(1, min(period, 7))
+    if period not in (1, 3, 7):
+        period = 1
 
     tld = str(
         tld or "all"
     ).strip().lower()
 
+    try:
+        limit = int(
+            payload.get("limit", 500)
+        )
+    except Exception:
+        limit = 500
+
+    try:
+        workers = int(
+            payload.get("workers", 40)
+        )
+    except Exception:
+        workers = 40
+
+    try:
+        feed_timeout = int(
+            payload.get("feed_timeout", 120)
+        )
+    except Exception:
+        feed_timeout = 120
+
+    settings = payload.get(
+        "settings",
+        {}
+    )
+
+    if not isinstance(settings, dict):
+        settings = {}
+
     return scan_domains(
         period=period,
-        tld=tld
+        tld=tld,
+        limit=limit,
+        workers=workers,
+        feed_timeout=feed_timeout,
+        settings=settings,
     )
 
 
