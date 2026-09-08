@@ -9,133 +9,151 @@ DEFAULT_MIN_SCORE = 30
 DEFAULT_NEGATIVE_PENALTY = 12
 
 
-# High-value phrases that strongly indicate an investment/financial site.
+# Core investment / financial identity signals.
 STRONG = {
     "investment": [
+        "investment",
+        "investing",
+        "investor",
+        "investors",
         "investment company",
         "investment firm",
         "investment platform",
-        "investment management",
+        "investment service",
         "investment services",
-        "investment advisor",
-        "investment adviser",
-        "investment portfolio",
         "investment plan",
         "investment plans",
         "invest now",
         "start investing",
-        "managed investment",
-        "investor relations",
+        "invest with us",
+        "investment opportunity",
     ],
     "trading": [
-        "trading platform",
+        "trading",
+        "trader",
+        "traders",
+        "trade forex",
+        "forex trading",
+        "forex trader",
+        "stock trading",
+        "stock trader",
         "online trading",
         "online trader",
-        "forex trading",
-        "stock trading",
-        "crypto trading",
-        "securities trading",
+        "trading platform",
         "trading account",
-        "trading broker",
-        "trading brokerage",
-        "buy stocks",
-        "sell stocks",
-        "trade stocks",
-        "trade forex",
+        "trading system",
+        "trading signals",
+        "trading software",
+    ],
+    "finance": [
+        "finance",
+        "financial",
+        "financial services",
+        "financial company",
+        "financial platform",
+        "financial market",
+        "financial markets",
+        "capital",
+        "capital markets",
+        "financial solutions",
+    ],
+    "brokerage": [
+        "broker",
+        "brokerage",
+        "brokerage account",
+        "brokerage platform",
+        "online broker",
+        "stock broker",
+        "stockbroker",
+        "forex broker",
+        "crypto broker",
+        "securities broker",
     ],
     "wealth": [
         "wealth management",
         "wealth manager",
+        "wealth advisory",
         "asset management",
         "asset manager",
         "portfolio management",
         "portfolio manager",
+        "portfolio",
         "private wealth",
-        "wealth advisory",
-    ],
-    "finance": [
-        "financial services",
-        "financial company",
-        "financial institution",
-        "financial advisor",
-        "financial adviser",
-        "capital markets",
-        "financial markets",
-        "securities",
-        "securities firm",
-        "financial brokerage",
-    ],
-    "brokerage": [
-        "online broker",
-        "stock broker",
-        "stockbroker",
-        "brokerage account",
-        "brokerage platform",
-        "brokerage services",
-        "securities broker",
-        "open brokerage account",
     ],
     "funds": [
         "investment fund",
         "mutual fund",
-        "hedge fund",
-        "index fund",
         "fund management",
         "fund manager",
+        "hedge fund",
+        "index fund",
         "private equity",
         "venture capital",
-        "capital investment",
     ],
     "crypto": [
+        "cryptocurrency",
+        "crypto",
+        "bitcoin",
+        "ethereum",
+        "digital assets",
         "crypto exchange",
         "cryptocurrency exchange",
-        "crypto trading platform",
-        "digital asset trading",
-        "digital assets investment",
-        "digital asset exchange",
+        "crypto trading",
         "crypto investment",
-        "cryptocurrency investment",
-        "crypto portfolio",
+        "digital asset trading",
     ],
 }
 
 
-# Contextual financial terms.
+# Supporting financial activity signals.
 CONTEXT = [
     "investment account",
-    "investing account",
     "investor account",
     "trading account",
     "broker account",
+    "open account",
+    "open an account",
+    "create account",
     "portfolio",
+    "manage portfolio",
     "portfolio management",
     "market analysis",
+    "market data",
     "stock market",
     "financial market",
     "forex market",
     "foreign exchange",
     "stock exchange",
-    "securities market",
+    "securities",
+    "buy stocks",
+    "sell stocks",
+    "buy and sell",
+    "trade stocks",
+    "trade forex",
+    "trade crypto",
+    "trading assets",
+    "digital assets",
     "asset allocation",
-    "fund your account",
-    "fund account",
-    "deposit funds",
-    "withdraw investment",
-    "investment return",
-    "investment returns",
-    "return on investment",
-    "annual return",
     "managed portfolio",
     "investment portfolio",
     "financial portfolio",
     "capital management",
-    "capital investment",
-    "wealth planning",
+    "fund management",
+    "fund your account",
+    "deposit funds",
+    "withdraw funds",
+    "investment return",
+    "investment returns",
+    "return on investment",
+    "roi",
+    "annual return",
+    "passive income",
+    "investment opportunity",
+    "financial opportunity",
 ]
 
 
-# These words are deliberately weak.
-# They cannot qualify a website by themselves.
+# These are weak and never qualify a domain by themselves.
 GENERIC = [
     "profit",
     "profits",
@@ -143,8 +161,8 @@ GENERIC = [
     "income",
     "earn",
     "earnings",
+    "return",
     "returns",
-    "roi",
     "yield",
     "deposit",
     "withdraw",
@@ -154,15 +172,17 @@ GENERIC = [
     "premium",
     "membership",
     "join",
+    "bonus",
 ]
 
 
-# Hard-negative gambling indicators.
+# Gambling signals are treated as hard negatives.
 GAMBLING = [
     "casino",
     "online casino",
     "live casino",
     "casino games",
+    "casino bonus",
     "sports betting",
     "sport betting",
     "betting",
@@ -188,8 +208,6 @@ GAMBLING = [
     "crash game",
     "aviator",
     "betting odds",
-    "casino bonus",
-    "betting bonus",
     "free spins",
     "spin to win",
 ]
@@ -215,7 +233,12 @@ def _settings(settings):
 
     def integer(key, default, low, high):
         try:
-            value = int(settings.get(key, default))
+            value = int(
+                settings.get(
+                    key,
+                    default,
+                )
+            )
         except Exception:
             value = default
 
@@ -273,7 +296,7 @@ def _fetch(url, cfg):
                 "User-Agent": (
                     "Mozilla/5.0 "
                     "(compatible; "
-                    "LD76-Investment-Radar/6.0)"
+                    "LD76-Investment-Radar/7.0)"
                 ),
                 "Accept": (
                     "text/html,application/xhtml+xml,"
@@ -398,7 +421,7 @@ def _extract(html):
     )
 
 
-def _find_phrases(text, phrases):
+def _find(text, phrases):
     found = []
 
     for phrase in phrases:
@@ -419,7 +442,7 @@ def _matches(text):
     evidence = []
 
     for category, phrases in STRONG.items():
-        hits = _find_phrases(
+        hits = _find(
             text,
             phrases,
         )
@@ -428,31 +451,35 @@ def _matches(text):
             categories[category] = hits
             evidence.extend(hits)
 
-    context_hits = _find_phrases(
+    context_hits = _find(
         text,
         CONTEXT,
     )
 
-    generic_hits = _find_phrases(
+    generic_hits = _find(
         text,
         GENERIC,
     )
 
-    gambling_hits = _find_phrases(
+    gambling_hits = _find(
         text,
         GAMBLING,
     )
 
-    negative_hits = _find_phrases(
+    negative_hits = _find(
         text,
         NEGATIVE,
     )
 
-    evidence.extend(context_hits)
+    evidence.extend(
+        context_hits
+    )
 
     return (
         categories,
-        list(dict.fromkeys(evidence)),
+        list(
+            dict.fromkeys(evidence)
+        ),
         context_hits,
         generic_hits,
         gambling_hits,
@@ -468,47 +495,47 @@ def _score(
 ):
     score = 0
 
-    # Strong financial categories.
-    score += len(categories) * 12
+    # Core financial identity.
+    score += len(categories) * 10
 
-    # Strong contextual phrases.
+    # Strong phrases.
     score += min(
-        len(evidence) * 4,
+        len(evidence) * 3,
         36,
     )
 
-    # Extra value for the most important categories.
+    # Category bonuses.
     if "investment" in categories:
-        score += 20
+        score += 18
 
     if "trading" in categories:
         score += 18
 
-    if "wealth" in categories:
-        score += 15
+    if "finance" in categories:
+        score += 10
 
     if "brokerage" in categories:
-        score += 15
+        score += 14
+
+    if "wealth" in categories:
+        score += 14
 
     if "funds" in categories:
-        score += 15
-
-    if "finance" in categories:
-        score += 12
+        score += 14
 
     if "crypto" in categories:
-        score += 8
+        score += 7
 
-    # Context makes a generic-looking site more credible.
+    # Financial context.
     score += min(
         len(context_hits) * 3,
         18,
     )
 
-    # Gambling is heavily penalized.
+    # Gambling penalty.
     score -= min(
-        len(gambling_hits) * 20,
-        80,
+        len(gambling_hits) * 25,
+        90,
     )
 
     return max(
@@ -560,13 +587,30 @@ def detect_investment(
         gambling_hits,
     )
 
-    strong_count = len(categories)
-    context_count = len(context_hits)
+    strong_count = len(
+        categories
+    )
 
-    # A gambling website is rejected when gambling
-    # terminology is substantial, even if it mentions
-    # money, profit, trading, crypto, or investment.
-    gambling_hard_reject = (
+    # A single weak word must never qualify.
+    #
+    # One genuine financial category plus
+    # supporting financial context is enough.
+    #
+    # Multiple financial categories can qualify
+    # even when the page uses unusual wording.
+    financial_match = (
+        (
+            strong_count >= 1
+            and (
+                context_hits
+                or len(evidence) >= 2
+            )
+        )
+        or strong_count >= 2
+    )
+
+    # Gambling is a hard exclusion.
+    gambling_reject = (
         len(gambling_hits) >= 2
         or (
             len(gambling_hits) >= 1
@@ -574,23 +618,14 @@ def detect_investment(
         )
     )
 
-    # Generic financial words alone are never enough.
-    financial_context = (
-        strong_count >= 1
-        and (
-            context_count >= 1
-            or len(evidence) >= 2
-        )
-    )
-
     qualified = (
-        not gambling_hard_reject
+        not gambling_reject
+        and financial_match
         and score >= cfg["min_score"]
-        and financial_context
         and len(negatives) < 2
     )
 
-    if gambling_hard_reject:
+    if gambling_reject:
         score = min(
             score,
             10,
@@ -613,7 +648,7 @@ def detect_investment(
         "matched_categories": list(
             categories.keys()
         ),
-        "evidence": evidence[:20],
+        "evidence": evidence[:25],
         "negative_signals": (
             negatives[:20]
             + gambling_hits[:20]
