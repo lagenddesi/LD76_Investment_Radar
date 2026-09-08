@@ -11,76 +11,191 @@
 button{font:inherit;color:inherit;border:0;cursor:pointer}a{color:var(--accent);text-decoration:none}
 .app{max-width:560px;min-height:100vh;margin:auto;padding-bottom:76px}
 header{height:64px;padding:10px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
-.logo{width:40px;height:40px;border-radius:12px;background:var(--accent);color:#07100a;display:grid;place-items:center;font-weight:800}.head{flex:1}.head b{display:block}.head small,p,.muted{color:var(--muted)}
+.logo{width:40px;height:40px;border-radius:12px;background:var(--accent);color:#07100a;display:grid;place-items:center;font-weight:800}
+.head{flex:1}.head b{display:block}.head small,p,.muted{color:var(--muted)}
 .icon{background:var(--card);width:40px;height:40px;border-radius:12px}
 main{padding:16px}.screen{display:none}.screen.active{display:block}
 h1{font-size:24px;margin:4px 0 6px}h2{font-size:18px;margin:0 0 12px}p{margin:6px 0}
 .card,.detail-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:12px 0}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{padding:12px;background:var(--card2);border-radius:12px;text-align:center}.stat b{display:block;font-size:19px}.stat small{color:var(--muted)}
-.row{display:flex;gap:8px;align-items:center}.between{justify-content:space-between}.chips{display:flex;gap:8px;overflow:auto;padding-bottom:3px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{padding:12px;background:var(--card2);border-radius:12px;text-align:center}.stat b{display:block;font-size:19px}.stat small{color:var(--muted)}
+.row{display:flex;gap:8px;align-items:center}.between{justify-content:space-between}
+.chips{display:flex;gap:8px;overflow:auto;padding-bottom:3px}
 .chip{padding:9px 13px;border-radius:20px;background:var(--card2);white-space:nowrap}.chip.on{background:var(--accent);color:#07100a;font-weight:700}
 .primary{width:100%;padding:14px;border-radius:13px;background:var(--accent);color:#07100a;font-weight:800;margin-top:10px}.primary:disabled{opacity:.6}
 .secondary{padding:12px;border-radius:12px;background:var(--card2)}
 .progress{height:8px;background:var(--card2);border-radius:8px;overflow:hidden;margin:14px 0}.bar{height:100%;width:0;background:var(--accent);transition:.25s}
 .result{padding:14px;background:var(--card);border:1px solid var(--border);border-radius:14px;margin:10px 0;cursor:pointer}.result:hover{border-color:var(--accent)}
-.domain{font-weight:800;word-break:break-all}.score{color:var(--accent);font-weight:800}.badge{display:inline-block;padding:4px 8px;border-radius:8px;background:var(--card2);font-size:12px;margin:4px 3px 0 0}
+.domain{font-weight:800;word-break:break-all}.score{color:var(--accent);font-weight:800}
+.badge{display:inline-block;padding:4px 8px;border-radius:8px;background:var(--card2);font-size:12px;margin:4px 3px 0 0}
 .item{padding:11px 0;border-bottom:1px solid var(--border)}.item:last-child{border:0}.item b{display:block}.item span{color:var(--muted);font-size:13px}
-.detail-title{font-size:22px;font-weight:800;word-break:break-all;margin-bottom:10px}.detail-category{display:inline-block;padding:6px 10px;border-radius:10px;background:var(--accent);color:#07100a;font-weight:800;font-size:13px}
+input[type=number]{width:100%;padding:10px;margin-top:7px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:10px}
+.detail-title{font-size:22px;font-weight:800;word-break:break-all;margin-bottom:10px}
+.detail-category{display:inline-block;padding:6px 10px;border-radius:10px;background:var(--accent);color:#07100a;font-weight:800;font-size:13px}
 .detail-score{font-size:30px;font-weight:900;color:var(--accent);margin-top:14px}.confidence{margin-top:3px;color:var(--muted)}
 .open-button{display:block;text-align:center;padding:13px;border-radius:12px;background:var(--accent);color:#07100a;font-weight:800;margin-top:14px}
 .rdap-button{width:100%;padding:13px;border-radius:12px;background:var(--card2);margin-top:8px;font-weight:700}.rdap-button:disabled{opacity:.6}
 .rdap-box{margin-top:14px;background:var(--card2);border-radius:12px;padding:12px;overflow:auto;font-size:12px;word-break:break-word;line-height:1.6}.error-box{color:var(--danger)}
-.rdap-title{font-size:15px;font-weight:800;margin-bottom:10px}.rdap-row{padding:7px 0;border-bottom:1px solid var(--border)}.rdap-row:last-child{border:0}.rdap-label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase}.rdap-value{white-space:pre-wrap}
+.rdap-title{font-size:15px;font-weight:800;margin-bottom:10px}.rdap-row{padding:7px 0;border-bottom:1px solid var(--border)}.rdap-row:last-child{border:0}
+.rdap-label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase}.rdap-value{white-space:pre-wrap}
 .evidence{margin-top:14px}.evidence-row{display:flex;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)}.evidence-icon{color:var(--accent);font-weight:800}.evidence-text{flex:1;word-break:break-word}
 nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(560px,100%);height:68px;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:10}
 nav button{flex:1;background:none;color:var(--muted);font-size:12px}nav button.on{color:var(--accent);font-weight:700}
-.toggle{width:46px;height:26px;border-radius:20px;background:var(--card2);padding:3px}.toggle i{display:block;width:20px;height:20px;border-radius:50%;background:var(--muted);transition:.2s}.toggle.on{background:var(--accent)}.toggle.on i{background:#07100a;transform:translateX(20px)}
+.toggle{width:46px;height:26px;border-radius:20px;background:var(--card2);padding:3px}.toggle i{display:block;width:20px;height:20px;border-radius:50%;background:var(--muted);transition:.2s}
+.toggle.on{background:var(--accent)}.toggle.on i{background:#07100a;transform:translateX(20px)}
 .back{background:none;padding:0 0 12px;color:var(--accent)}.empty,.loading{text-align:center;padding:35px 10px;color:var(--muted)}.error{color:var(--danger);text-align:center;padding:20px 10px}
+.save{color:var(--accent);text-align:center;font-size:13px;margin-top:10px}
 </style>
 </head>
 <body>
 <div class="app">
-<header><div class="logo">LD</div><div class="head"><b>Investment Radar</b><small>LD76 Domain Discovery</small></div><button class="icon" onclick="notify()">🔔</button></header>
+
+<header>
+<div class="logo">LD</div>
+<div class="head"><b>Investment Radar</b><small>LD76 Domain Discovery</small></div>
+<button class="icon" onclick="notify()">🔔</button>
+</header>
 
 <main>
+
 <section id="home" class="screen active">
-<h1>Find New Investment Domains</h1><p>Discover newly appearing domains and detect real investment platforms.</p>
-<div class="card"><h2>Scan Period</h2><div class="chips">
-<button class="chip on" data-period="1" onclick="period(1)">1 Day</button><button class="chip" data-period="3" onclick="period(3)">3 Days</button><button class="chip" data-period="7" onclick="period(7)">7 Days</button>
-</div></div>
-<div class="card"><h2>TLD</h2><div class="chips">
-<button class="chip on" data-tld="all" onclick="tld('all')">All</button><button class="chip" data-tld="com" onclick="tld('com')">.com</button><button class="chip" data-tld="net" onclick="tld('net')">.net</button><button class="chip" data-tld="org" onclick="tld('org')">.org</button><button class="chip" data-tld="info" onclick="tld('info')">.info</button>
-</div></div>
+<h1>Find New Investment Domains</h1>
+<p>Discover newly appearing domains and detect real investment platforms.</p>
+
+<div class="card">
+<h2>Scan Period</h2>
+<div class="chips">
+<button class="chip on" data-period="1" onclick="period(1)">1 Day</button>
+<button class="chip" data-period="3" onclick="period(3)">3 Days</button>
+<button class="chip" data-period="7" onclick="period(7)">7 Days</button>
+</div>
+</div>
+
+<div class="card">
+<h2>TLD</h2>
+<div class="chips">
+<button class="chip on" data-tld="all" onclick="tld('all')">All</button>
+<button class="chip" data-tld="com" onclick="tld('com')">.com</button>
+<button class="chip" data-tld="net" onclick="tld('net')">.net</button>
+<button class="chip" data-tld="org" onclick="tld('org')">.org</button>
+<button class="chip" data-tld="info" onclick="tld('info')">.info</button>
+<button class="chip" data-tld="xyz" onclick="tld('xyz')">.xyz</button>
+<button class="chip" data-tld="top" onclick="tld('top')">.top</button>
+</div>
+</div>
+
 <button class="primary" id="scanButton" onclick="startScan()">START SCAN</button>
-<div class="grid card"><div class="stat"><b id="domains">0</b><small>Domains</small></div><div class="stat"><b id="checked">0</b><small>Checked</small></div><div class="stat"><b id="found">0</b><small>Found</small></div></div>
+
+<div class="grid card">
+<div class="stat"><b id="domains">0</b><small>Domains</small></div>
+<div class="stat"><b id="checked">0</b><small>Checked</small></div>
+<div class="stat"><b id="found">0</b><small>Found</small></div>
+</div>
 </section>
 
 <section id="scan" class="screen">
-<h1>Scanning</h1><p id="scanStatus">Preparing scanner...</p>
-<div class="card"><div class="progress"><div class="bar" id="bar"></div></div><div class="grid">
-<div class="stat"><b id="sDomains">0</b><small>Domains</small></div><div class="stat"><b id="sChecked">0</b><small>Checked</small></div><div class="stat"><b id="sFound">0</b><small>Found</small></div>
-</div></div><button class="secondary" onclick="show('results')">View Results</button>
+<h1>Scanning</h1>
+<p id="scanStatus">Preparing scanner...</p>
+<div class="card">
+<div class="progress"><div class="bar" id="bar"></div></div>
+<div class="grid">
+<div class="stat"><b id="sDomains">0</b><small>Domains</small></div>
+<div class="stat"><b id="sChecked">0</b><small>Checked</small></div>
+<div class="stat"><b id="sFound">0</b><small>Found</small></div>
+</div>
+</div>
+<button class="secondary" onclick="show('results')">View Results</button>
 </section>
 
 <section id="results" class="screen">
-<h1>Investment Results</h1><p id="resultInfo">No scan completed.</p><div id="resultsList"><div class="empty">Start a scan to see results.</div></div>
+<h1>Investment Results</h1>
+<p id="resultInfo">No scan completed.</p>
+<div id="resultsList"><div class="empty">Start a scan to see results.</div></div>
 </section>
 
 <section id="details" class="screen">
-<button class="back" onclick="show('results')">← Results</button><div id="detail"></div>
+<button class="back" onclick="show('results')">← Results</button>
+<div id="detail"></div>
 </section>
 
 <section id="settings" class="screen">
 <h1>Settings</h1>
-<div class="card"><div class="row between"><div><b>Dark Theme</b><p>Use dark app appearance</p></div><button class="toggle on" id="themeToggle" onclick="theme()"><i></i></button></div></div>
-<div class="card"><h2>Scanner</h2>
-<div class="item"><b>Discovery</b><span>Smet Newly Registered Domains</span></div>
-<div class="item"><b>Verification</b><span>RDAP / WHOIS</span></div>
-<div class="item"><b>Detection</b><span>Content, actions, payment, account and referral signals</span></div>
-<div class="item"><b>Scan Limit</b><span>Maximum 500 domains per scan</span></div>
-<div class="item"><b>False Positives</b><span>Domain parking and generic pages are filtered.</span></div>
+
+<div class="card">
+<h2>Scan Settings</h2>
+
+<div class="item">
+<b>Domain Limit</b>
+<span>Maximum domains checked in one scan. Higher value finds more domains but takes longer.</span>
+<input id="setLimit" type="number" min="10" max="5000" value="500">
+</div>
+
+<div class="item">
+<b>Concurrent Workers</b>
+<span>Websites checked at the same time. Higher value can make scanning faster but increases network/server load.</span>
+<input id="setWorkers" type="number" min="1" max="60" value="40">
+</div>
+
+<div class="item">
+<b>Request Timeout</b>
+<span>Maximum seconds to wait for a website. Higher value gives slow websites more time to respond.</span>
+<input id="setTimeout" type="number" min="3" max="30" value="8">
+</div>
+
+<div class="item">
+<b>Maximum Page Size</b>
+<span>Maximum website content read by the detector. Higher value allows larger pages but uses more bandwidth.</span>
+<input id="setBytes" type="number" min="100" max="5120" value="800">
+<span>Value is in KB.</span>
+</div>
+
+<div class="item">
+<b>Minimum Score</b>
+<span>Minimum detection score required for a domain to appear in results. Lower value gives more results but may increase false positives.</span>
+<input id="setScore" type="number" min="1" max="100" value="30">
+</div>
+
+<div class="item">
+<b>Negative Signal Penalty</b>
+<span>Penalty applied to parked, for-sale and default-page signals. Higher value filters suspicious/generic domains more aggressively.</span>
+<input id="setPenalty" type="number" min="0" max="50" value="12">
+</div>
+
+<div class="item">
+<div class="row between">
+<div><b>Follow Redirects</b><span>Follow website redirects and scan the final page.</span></div>
+<button class="toggle on" id="setRedirects" onclick="toggleSetting(this)"><i></i></button>
+</div>
+</div>
+
+<div class="item">
+<div class="row between">
+<div><b>HTTPS Fallback</b><span>If HTTPS fails, also try the HTTP version.</span></div>
+<button class="toggle on" id="setFallback" onclick="toggleSetting(this)"><i></i></button>
+</div>
+</div>
+
+<button class="primary" onclick="saveSettings()">SAVE SETTINGS</button>
+<div id="settingsSaved" class="save"></div>
+</div>
+
+<div class="card">
+<h2>Scanner Information</h2>
+<div class="item"><b>Discovery</b><span>Newly Registered Domains feed</span></div>
+<div class="item"><b>Verification</b><span>RDAP / WHOIS domain information</span></div>
+<div class="item"><b>Detection</b><span>Investment, trading, crypto, finance, profit and related website signals.</span></div>
+<div class="item"><b>TLD Filter</b><span>Choose All, .com, .net, .org, .info, .xyz or .top.</span></div>
+<div class="item"><b>Storage</b><span>Scanner settings are saved locally on this device.</span></div>
+</div>
+
+<div class="card">
+<div class="row between">
+<div><b>Dark Theme</b><p>Use dark app appearance.</p></div>
+<button class="toggle on" id="themeToggle" onclick="theme()"><i></i></button>
+</div>
 </div>
 </section>
+
 </main>
 
 <nav>
@@ -92,104 +207,371 @@ nav button{flex:1;background:none;color:var(--muted);font-size:12px}nav button.o
 </div>
 
 <script>
-const state={period:1,tld:"all",scanning:false,results:[]};
+const state={
+ period:1,
+ tld:"all",
+ scanning:false,
+ results:[],
+ settings:{
+  limit:500,
+  workers:40,
+  timeout:8,
+  max_bytes:800*1024,
+  min_score:30,
+  negative_penalty:12,
+  redirects:true,
+  https_fallback:true
+ }
+};
 
 function show(id){
  document.querySelectorAll(".screen").forEach(e=>e.classList.toggle("active",e.id===id));
  document.querySelectorAll("nav button").forEach(e=>e.classList.toggle("on",e.dataset.screen===id));
  if(id==="results")renderResults();
 }
-function period(v){state.period=v;document.querySelectorAll("[data-period]").forEach(e=>e.classList.toggle("on",+e.dataset.period===v))}
-function tld(v){state.tld=v;document.querySelectorAll("[data-tld]").forEach(e=>e.classList.toggle("on",e.dataset.tld===v))}
-function notify(){alert("Notifications will be connected later.")}
+
+function period(v){
+ state.period=v;
+ document.querySelectorAll("[data-period]").forEach(e=>e.classList.toggle("on",+e.dataset.period===v));
+}
+
+function tld(v){
+ state.tld=v;
+ document.querySelectorAll("[data-tld]").forEach(e=>e.classList.toggle("on",e.dataset.tld===v));
+}
+
+function notify(){
+ alert("Notifications will be connected later.");
+}
+
+function toggleSetting(el){
+ el.classList.toggle("on");
+}
+
+function saveSettings(){
+ state.settings={
+  limit:clamp(+document.getElementById("setLimit").value,10,5000,500),
+  workers:clamp(+document.getElementById("setWorkers").value,1,60,40),
+  timeout:clamp(+document.getElementById("setTimeout").value,3,30,8),
+  max_bytes:clamp(+document.getElementById("setBytes").value,100,5120,800)*1024,
+  min_score:clamp(+document.getElementById("setScore").value,1,100,30),
+  negative_penalty:clamp(+document.getElementById("setPenalty").value,0,50,12),
+  redirects:document.getElementById("setRedirects").classList.contains("on"),
+  https_fallback:document.getElementById("setFallback").classList.contains("on")
+ };
+
+ localStorage.setItem("ld76_settings",JSON.stringify(state.settings));
+ document.getElementById("settingsSaved").textContent="Settings saved.";
+}
+
+function clamp(v,min,max,def){
+ return Number.isFinite(v)?Math.max(min,Math.min(max,v)):def;
+}
+
+function loadSettings(){
+ try{
+  const s=JSON.parse(localStorage.getItem("ld76_settings")||"null");
+  if(!s)return;
+  state.settings={...state.settings,...s};
+
+  document.getElementById("setLimit").value=state.settings.limit;
+  document.getElementById("setWorkers").value=state.settings.workers;
+  document.getElementById("setTimeout").value=state.settings.timeout;
+  document.getElementById("setBytes").value=Math.round(state.settings.max_bytes/1024);
+  document.getElementById("setScore").value=state.settings.min_score;
+  document.getElementById("setPenalty").value=state.settings.negative_penalty;
+  document.getElementById("setRedirects").classList.toggle("on",state.settings.redirects);
+  document.getElementById("setFallback").classList.toggle("on",state.settings.https_fallback);
+ }catch(e){}
+}
 
 async function startScan(){
  if(state.scanning)return;
- state.scanning=true;state.results=[];
- const b=document.getElementById("scanButton");b.disabled=true;b.textContent="SCANNING...";show("scan");setProgress(5,0,0,"Downloading newly registered domains...");
+
+ state.scanning=true;
+ state.results=[];
+
+ const b=document.getElementById("scanButton");
+ b.disabled=true;
+ b.textContent="SCANNING...";
+
+ show("scan");
+ setProgress(5,0,0,0,"Downloading newly registered domains...");
+
  try{
-  const r=await fetch("/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({period:state.period,tld:state.tld})});
+  const r=await fetch("/api/scan",{
+   method:"POST",
+   headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({
+    period:state.period,
+    tld:state.tld,
+    limit:state.settings.limit,
+    workers:state.settings.workers,
+    feed_timeout:120,
+    settings:state.settings
+   })
+  });
+
   if(!r.ok)throw Error("HTTP "+r.status);
-  const d=await r.json();state.results=Array.isArray(d.results)?d.results:[];
-  setProgress(100,+d.checked||0,+d.found||0,d.message||"Scan completed.");
+
+  const d=await r.json();
+
+  state.results=Array.isArray(d.results)?d.results:[];
+
+  setProgress(
+   100,
+   +d.total||0,
+   +d.checked||0,
+   +d.found||0,
+   d.message||"Scan completed."
+  );
+
   show("results");
+
  }catch(e){
-  console.error(e);setProgress(0,0,0,"Scanner API error.");document.getElementById("resultsList").innerHTML='<div class="error">'+esc(e.message||"Scanner failed.")+"</div>";show("results");
- }finally{state.scanning=false;b.disabled=false;b.textContent="START SCAN"}
+  console.error(e);
+  setProgress(0,0,0,0,"Scanner API error.");
+  document.getElementById("resultsList").innerHTML=
+   '<div class="error">'+esc(e.message||"Scanner failed.")+"</div>";
+  show("results");
+ }finally{
+  state.scanning=false;
+  b.disabled=false;
+  b.textContent="START SCAN";
+ }
 }
 
-function setProgress(p,c,f,s){
- document.getElementById("bar").style.width=p+"%";document.getElementById("scanStatus").textContent=s;
- ["domains","checked","sDomains","sChecked"].forEach(id=>document.getElementById(id).textContent=c);
- ["found","sFound"].forEach(id=>document.getElementById(id).textContent=f);
+function setProgress(p,d,c,f,s){
+ document.getElementById("bar").style.width=p+"%";
+ document.getElementById("scanStatus").textContent=s;
+
+ document.getElementById("domains").textContent=d;
+ document.getElementById("checked").textContent=c;
+ document.getElementById("found").textContent=f;
+
+ document.getElementById("sDomains").textContent=d;
+ document.getElementById("sChecked").textContent=c;
+ document.getElementById("sFound").textContent=f;
 }
-function obj(i){return i&&typeof i.result==="object"?i.result:i||{}}
-function domain(i){return i?.domain||obj(i).domain||"Unknown domain"}
-function score(i){let n=Number(obj(i).score??i?.score??0);return Number.isFinite(n)?n:0}
-function category(i){let o=obj(i),c=o.category||i?.category;if(c&&c!=="Unknown")return c;return o.matched_categories?.[0]||"Investment"}
-function confidence(s){return s>=60?"High":s>=35?"Medium":s>=20?"Low":"Weak"}
+
+function obj(i){
+ return i&&typeof i.result==="object"?i.result:i||{};
+}
+
+function domain(i){
+ return i?.domain||obj(i).domain||"Unknown domain";
+}
+
+function score(i){
+ let n=Number(obj(i).score??i?.score??0);
+ return Number.isFinite(n)?n:0;
+}
+
+function category(i){
+ let o=obj(i),c=o.category||i?.category;
+ if(c&&c!=="Unknown")return c;
+ return o.matched_categories?.[0]||"Investment";
+}
+
+function confidence(s){
+ return s>=60?"High":s>=35?"Medium":s>=20?"Low":"Weak";
+}
+
 function evidence(i){
- let a=obj(i).evidence||i?.evidence||[];if(!Array.isArray(a))return[];
- return a.map(x=>typeof x==="string"?x:x?.signal||x?.phrase||x?.text||"").filter(Boolean)
+ let a=obj(i).evidence||i?.evidence||[];
+ if(!Array.isArray(a))return[];
+ return a.map(x=>typeof x==="string"?x:x?.signal||x?.phrase||x?.text||"").filter(Boolean);
 }
+
 function negatives(i){
- let a=obj(i).negative_signals||i?.negative_signals||[];if(!Array.isArray(a))return[];
- return a.map(x=>typeof x==="string"?x:x?.signal||x?.phrase||x?.text||"").filter(Boolean)
+ let a=obj(i).negative_signals||i?.negative_signals||[];
+ if(!Array.isArray(a))return[];
+ return a.map(x=>typeof x==="string"?x:x?.signal||x?.phrase||x?.text||"").filter(Boolean);
 }
-function url(i){return obj(i).url||i?.url||("https://"+domain(i))}
+
+function url(i){
+ return obj(i).url||i?.url||("https://"+domain(i));
+}
+
 function renderResults(){
- const box=document.getElementById("resultsList"),n=state.results.length;document.getElementById("resultInfo").textContent=n+" investment domains found.";
- if(!n){box.innerHTML='<div class="empty">No matching investment domains found.</div>';return}
- box.innerHTML=state.results.map((i,x)=>`<div class="result" onclick="details(${x})"><div class="row between"><span class="domain">${esc(domain(i))}</span><span class="score">${score(i)}</span></div><span class="badge">${esc(category(i))}</span><span class="badge">${confidence(score(i))} Confidence</span>${evidence(i)[0]?`<div class="muted" style="margin-top:8px">${esc(evidence(i)[0])}</div>`:""}</div>`).join("")
+ const box=document.getElementById("resultsList");
+ const n=state.results.length;
+
+ document.getElementById("resultInfo").textContent=
+  n+" investment domains found.";
+
+ if(!n){
+  box.innerHTML='<div class="empty">No matching investment domains found.</div>';
+  return;
+ }
+
+ box.innerHTML=state.results.map((i,x)=>
+  `<div class="result" onclick="details(${x})">
+   <div class="row between">
+    <span class="domain">${esc(domain(i))}</span>
+    <span class="score">${score(i)}</span>
+   </div>
+   <span class="badge">${esc(category(i))}</span>
+   <span class="badge">${confidence(score(i))} Confidence</span>
+   ${evidence(i)[0]?`<div class="muted" style="margin-top:8px">${esc(evidence(i)[0])}</div>`:""}
+  </div>`
+ ).join("");
 }
 
 function details(i){
- const x=state.results[i];if(!x)return;
- const d=domain(x),s=score(x),c=category(x),u=url(x),ev=evidence(x),ng=negatives(x),safe=validUrl(u);
+ const x=state.results[i];
+ if(!x)return;
+
+ const d=domain(x);
+ const s=score(x);
+ const c=category(x);
+ const u=url(x);
+ const ev=evidence(x);
+ const ng=negatives(x);
+ const safe=validUrl(u);
+
  document.getElementById("detail").innerHTML=`
- <div class="detail-card"><div class="detail-title">${esc(d)}</div><span class="detail-category">${esc(c)}</span><div class="detail-score">${s}</div><div class="confidence">${confidence(s)} Confidence</div></div>
- <div class="detail-card"><h2>Domain Information</h2><div class="item"><b>Domain</b><span>${esc(d)}</span></div><div class="item"><b>Website</b><span>${safe?`<a href="${escAttr(u)}" target="_blank" rel="noopener">${esc(u)}</a>`:"Unavailable"}</span></div><div class="item"><b>Detection Score</b><span>${s}</span></div><div class="item"><b>Detection Category</b><span>${esc(c)}</span></div></div>
- <div class="detail-card evidence"><h2>Evidence</h2>${ev.length?ev.map(t=>`<div class="evidence-row"><span class="evidence-icon">✓</span><span class="evidence-text">${esc(t)}</span></div>`).join(""):'<div class="muted">No readable evidence returned.</div>'}</div>
- ${ng.length?`<div class="detail-card evidence"><h2>Negative Signals</h2>${ng.map(t=>`<div class="evidence-row"><span style="color:var(--danger);font-weight:800">!</span><span class="evidence-text">${esc(t)}</span></div>`).join("")}</div>`:""}
+ <div class="detail-card">
+  <div class="detail-title">${esc(d)}</div>
+  <span class="detail-category">${esc(c)}</span>
+  <div class="detail-score">${s}</div>
+  <div class="confidence">${confidence(s)} Confidence</div>
+ </div>
+
+ <div class="detail-card">
+  <h2>Domain Information</h2>
+  <div class="item"><b>Domain</b><span>${esc(d)}</span></div>
+  <div class="item"><b>Website</b><span>${safe?`<a href="${escAttr(u)}" target="_blank" rel="noopener">${esc(u)}</a>`:"Unavailable"}</span></div>
+  <div class="item"><b>Detection Score</b><span>${s}</span></div>
+  <div class="item"><b>Detection Category</b><span>${esc(c)}</span></div>
+ </div>
+
+ <div class="detail-card evidence">
+  <h2>Evidence</h2>
+  ${ev.length?ev.map(t=>`
+   <div class="evidence-row">
+    <span class="evidence-icon">✓</span>
+    <span class="evidence-text">${esc(t)}</span>
+   </div>`).join(""):'<div class="muted">No readable evidence returned.</div>'}
+ </div>
+
+ ${ng.length?`
+ <div class="detail-card evidence">
+  <h2>Negative Signals</h2>
+  ${ng.map(t=>`
+   <div class="evidence-row">
+    <span style="color:var(--danger);font-weight:800">!</span>
+    <span class="evidence-text">${esc(t)}</span>
+   </div>`).join("")}
+ </div>`:""}
+
  ${safe?`<a class="open-button" href="${escAttr(u)}" target="_blank" rel="noopener">OPEN WEBSITE</a>`:""}
- <button class="rdap-button" id="rdapButton">RDAP</button><div id="rdapBox" class="rdap-box" style="display:none"></div>`;
+
+ <button class="rdap-button" id="rdapButton">RDAP</button>
+ <div id="rdapBox" class="rdap-box" style="display:none"></div>
+ `;
+
  document.getElementById("rdapButton").onclick=()=>loadRdap(d);
  show("details");
 }
 
 async function loadRdap(d){
- const box=document.getElementById("rdapBox"),btn=document.getElementById("rdapButton");if(!box)return;
- box.style.display="block";box.classList.remove("error-box");box.innerHTML='<div class="rdap-title">RDAP Information</div><div class="muted">Loading...</div>';btn.disabled=true;btn.textContent="LOADING...";
+ const box=document.getElementById("rdapBox");
+ const btn=document.getElementById("rdapButton");
+
+ if(!box)return;
+
+ box.style.display="block";
+ box.classList.remove("error-box");
+ box.innerHTML=
+  '<div class="rdap-title">RDAP Information</div><div class="muted">Loading...</div>';
+
+ btn.disabled=true;
+ btn.textContent="LOADING...";
+
  try{
-  const r=await fetch("/api/rdap?domain="+encodeURIComponent(d),{cache:"no-store"});
-  const t=await r.text();let x;try{x=JSON.parse(t)}catch(e){throw Error("Invalid server response")}
+  const r=await fetch(
+   "/api/rdap?domain="+encodeURIComponent(d),
+   {cache:"no-store"}
+  );
+
+  const t=await r.text();
+  let x;
+
+  try{
+   x=JSON.parse(t);
+  }catch(e){
+   throw Error("Invalid server response");
+  }
+
   if(!r.ok)throw Error(x.error||x.detail||"HTTP "+r.status);
   if(x.error)throw Error(x.error+(x.details?" — "+x.details:""));
+
   box.innerHTML=formatRdap(x);
+
  }catch(e){
-  console.error("RDAP:",e);box.classList.add("error-box");box.innerHTML='<div class="rdap-title">RDAP Error</div>'+esc(e.message||"Request failed");
- }finally{btn.disabled=false;btn.textContent="RDAP"}
+  console.error("RDAP:",e);
+  box.classList.add("error-box");
+  box.innerHTML=
+   '<div class="rdap-title">RDAP Error</div>'+
+   esc(e.message||"Request failed");
+ }finally{
+  btn.disabled=false;
+  btn.textContent="RDAP";
+ }
 }
 
 function formatRdap(x){
  const rows=[
- ["Domain",x.domain||x.ldhName||x.name||"Unavailable"],
- ["Registration",x.registration_date||x.registrationDate||x.created||"Unavailable"],
- ["Expiry",x.expiry||x.expirationDate||x.expires||"Unavailable"],
- ["Last Changed",x.last_changed||x.lastChanged||"Unavailable"],
- ["Registrar",x.registrar||x.registrar_name||"Unavailable"],
- ["Status",Array.isArray(x.status)?x.status.join(", "):(x.status||"Unavailable")],
- ["Nameservers",Array.isArray(x.nameservers)?x.nameservers.join("\n"):(x.name_servers||"Unavailable")],
- ["RDAP Server",x.rdap_server||"Unavailable"],
- ["RDAP URL",x.rdap_url||"Unavailable"]
+  ["Domain",x.domain||x.ldhName||x.name||"Unavailable"],
+  ["Registration",x.registration_date||x.registrationDate||x.created||"Unavailable"],
+  ["Expiry",x.expiry||x.expirationDate||x.expires||"Unavailable"],
+  ["Last Changed",x.last_changed||x.lastChanged||"Unavailable"],
+  ["Registrar",x.registrar||x.registrar_name||"Unavailable"],
+  ["Status",Array.isArray(x.status)?x.status.join(", "):(x.status||"Unavailable")],
+  ["Nameservers",Array.isArray(x.nameservers)?x.nameservers.join("\n"):(x.name_servers||"Unavailable")],
+  ["RDAP Server",x.rdap_server||"Unavailable"],
+  ["RDAP URL",x.rdap_url||"Unavailable"]
  ];
- return '<div class="rdap-title">RDAP Information</div>'+rows.map(r=>`<div class="rdap-row"><span class="rdap-label">${esc(r[0])}</span><span class="rdap-value">${esc(r[1])}</span></div>`).join("")
+
+ return '<div class="rdap-title">RDAP Information</div>'+
+  rows.map(r=>
+   `<div class="rdap-row">
+    <span class="rdap-label">${esc(r[0])}</span>
+    <span class="rdap-value">${esc(r[1])}</span>
+   </div>`
+  ).join("");
 }
 
-function validUrl(v){try{let u=new URL(v);return u.protocol==="http:"||u.protocol==="https:"}catch(e){return false}}
-function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
-function escAttr(v){return esc(v)}
-function theme(){let b=document.getElementById("themeToggle");document.body.classList.toggle("light");b.classList.toggle("on")}
+function validUrl(v){
+ try{
+  let u=new URL(v);
+  return u.protocol==="http:"||u.protocol==="https:";
+ }catch(e){
+  return false;
+ }
+}
+
+function esc(v){
+ return String(v??"")
+  .replace(/&/g,"&amp;")
+  .replace(/</g,"&lt;")
+  .replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;")
+  .replace(/'/g,"&#039;");
+}
+
+function escAttr(v){
+ return esc(v);
+}
+
+function theme(){
+ let b=document.getElementById("themeToggle");
+ document.body.classList.toggle("light");
+ b.classList.toggle("on");
+}
+
+loadSettings();
 </script>
 </body>
 </html>
